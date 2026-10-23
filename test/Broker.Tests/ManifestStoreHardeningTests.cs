@@ -159,6 +159,23 @@ public sealed class ManifestStoreHardeningTests : IDisposable
     }
 
     [Fact]
+    public void HotReloadRevokesAnActiveToolWhoseTierBecomesUnrecognized()
+    {
+        Write(ToolJson("a", tier: "write"), ToolJson("b"));
+        using var store = Open();
+        var revoked = new List<string>();
+        store.ToolsRevoked += ids => revoked.AddRange(ids);
+
+        // A typo in a live edit must remove the tool, never leave it running or default it to read.
+        Write(ToolJson("a", tier: "wrte"), ToolJson("b"));
+        store.ReloadNow();
+
+        Assert.Null(store.Get("a"));
+        Assert.NotNull(store.Get("b"));
+        Assert.Equal(new[] { "a" }, revoked);
+    }
+
+    [Fact]
     public async Task ARevocationDeliveredByAtomicRenameIsStillApplied()
     {
         Write(ToolJson("keep"), ToolJson("gone"));

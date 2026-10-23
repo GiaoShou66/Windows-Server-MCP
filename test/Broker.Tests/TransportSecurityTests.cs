@@ -347,6 +347,9 @@ public class PipePrincipalTests
     [InlineData("S-1-")]
     [InlineData("not-a-sid")]
     [InlineData("S-1-5-21-abc")]
+    [InlineData("S-1-5-21-\uFF11\uFF12\uFF13")]       // fullwidth digits: \d would match them
+    [InlineData("S-1-5-21-\u0661\u0662")]             // Arabic-Indic digits
+    [InlineData("S-1-5-21-1-2-3-1001\n")]
     public void MalformedSidsAreRefused(string sid) =>
         Assert.Throws<InvalidOperationException>(() => PipePrincipals.Validate(new[] { sid }));
 
@@ -417,7 +420,7 @@ public class ApprovalPipeServeTests
         Assert.Equal("set-windows-service-state", root.GetProperty("toolId").GetString());
         Assert.Equal("S-1-5-21-CALLER", root.GetProperty("callerSid").GetString());
         Assert.Equal("h9", root.GetProperty("paramHash").GetString());
-        var shown = root.GetProperty("parameters").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString());
+        var shown = root.GetProperty("parameters").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!);
         Assert.Equal(parameters, shown);
 
         cts.Cancel();
@@ -533,4 +536,101 @@ public class ApprovalPipeServeTests
         cts.Cancel();
         await Task.WhenAny(serve, Task.Delay(1000));
     }
+}
+
+
+/// <summary>Reads work (backed by a channel pair); writes never complete until cancelled, like a client that stopped reading.</summary>
+internal sealed class WriteStallStream : Stream
+{
+    private readonly Stream _inner;
+    public int WriteAttempts;
+    public WriteStallStream(Stream inner) => _inner = inner;
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => _inner.ReadAsync(buffer, ct);
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref WriteAttempts);
+        await Task.Delay(Timeout.Infinite, ct);
+    }
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override bool CanRead => true;
+    public override bool CanWrite => true;
+    public override bool CanSeek => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+}
+
+public class TransportResourceLimitTests
+{
+    [Fact]
+    public async Task AClientThatStopsReadingIsDisconnectedAfterTheWriteTimeout()
+    {
+        var dispatcher = new RecordingDispatcher();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Pipe:WriteTimeoutSeconds"] = "1", ["Pipe:FrameTimeoutSeconds"] = "5"
+        }).Build();
+        var server = new NamedPipeServer(new PipeSecurityFactory(config, NullLogger<PipeSecurityFactory>.Instance),
+            dispatcher, new ElicitationRouter(NullLogger<ElicitationRouter>.Instance), config, NullLogger<NamedPipeServer>.Instance);
+
+        var (serverSide, client) = ChannelStream.CreatePair();
+        var stalled = new WriteStallStream(serverSide);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var serve = server.ServeAsync(stalled, () => true, "CALLER", cts.Token);
+        await McpFraming.WriteFrameAsync(client, "{\"toolId\":\"echo\"}", cts.Token);
+
+        // The answer can never be delivered; the session must end by itself rather than hold its slot forever.
+        await serve.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, dispatcher.Calls);
+        Assert.True(stalled.WriteAttempts >= 1);
+    }
+
+    [Fact]
+    public void ACallerCannotHoldMoreConnectionsThanItsShare()
+    {
+        var limiter = new PerCallerConnectionLimiter(maxPerCaller: 2);
+
+        Assert.True(limiter.TryAcquire("A"));
+        Assert.True(limiter.TryAcquire("A"));
+        Assert.False(limiter.TryAcquire("A"));
+        Assert.True(limiter.TryAcquire("B"));   // other callers are unaffected
+
+        limiter.Release("A");
+        Assert.True(limiter.TryAcquire("A"));
+    }
+
+    [Fact]
+    public void ReleasingMoreThanWasAcquiredNeverGoesNegative()
+    {
+        var limiter = new PerCallerConnectionLimiter(maxPerCaller: 1);
+        limiter.Release("A"); limiter.Release("A");
+
+        Assert.True(limiter.TryAcquire("A"));
+        Assert.False(limiter.TryAcquire("A"));
+    }
+
+    [Fact]
+    public async Task ConcurrentAcquiresNeverExceedTheCap()
+    {
+        var limiter = new PerCallerConnectionLimiter(maxPerCaller: 5);
+        int granted = 0;
+
+        await Task.WhenAll(Enumerable.Range(0, 200).Select(_ => Task.Run(() =>
+        {
+            if (limiter.TryAcquire("A")) Interlocked.Increment(ref granted);
+        })));
+
+        Assert.Equal(5, granted);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void ABlankIdentityIsNeverGrantedAConnection(string sid) =>
+        Assert.False(new PerCallerConnectionLimiter(5).TryAcquire(sid));
 }

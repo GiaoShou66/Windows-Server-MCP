@@ -143,7 +143,7 @@ public sealed class ElicitationRouter
 internal static class PipePrincipals
 {
     private static readonly System.Text.RegularExpressions.Regex SidSyntax =
-        new(@"^S-1-\d+(-\d+)+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"^S-1-[0-9]+(-[0-9]+)+\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static readonly HashSet<string> TooBroad = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -286,6 +286,44 @@ public static class McpFraming
 }
 
 /// <summary>
+/// Caps how many pipe connections one caller may hold at once, so a single authorized (or
+/// compromised) client cannot occupy every slot and lock everyone else out.
+/// </summary>
+internal sealed class PerCallerConnectionLimiter
+{
+    private readonly int _maxPerCaller;
+    private readonly object _lock = new();
+    private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
+
+    public PerCallerConnectionLimiter(int maxPerCaller)
+    {
+        if (maxPerCaller < 1) throw new ArgumentOutOfRangeException(nameof(maxPerCaller));
+        _maxPerCaller = maxPerCaller;
+    }
+
+    public bool TryAcquire(string callerSid)
+    {
+        if (string.IsNullOrWhiteSpace(callerSid)) return false;
+        lock (_lock)
+        {
+            _counts.TryGetValue(callerSid, out var n);
+            if (n >= _maxPerCaller) return false;
+            _counts[callerSid] = n + 1;
+            return true;
+        }
+    }
+
+    public void Release(string callerSid)
+    {
+        lock (_lock)
+        {
+            if (!_counts.TryGetValue(callerSid, out var n)) return;
+            if (n <= 1) _counts.Remove(callerSid); else _counts[callerSid] = n - 1;
+        }
+    }
+}
+
+/// <summary>
 /// Multi-instance named pipe listener. Fixed slot count bounds resource use.
 /// Each connection gets a per-frame timeout so a stalled client cannot hold a slot, a bounded
 /// number of in-flight requests, and a bounded tolerance for malformed messages.
@@ -317,6 +355,8 @@ public sealed class NamedPipeServer
     private int FrameTimeoutSeconds => int.TryParse(_config["Pipe:FrameTimeoutSeconds"], out var n) ? n : 5;
     private int MaxInFlightPerConnection => PositiveInt("Pipe:MaxInFlightPerConnection", 16);
     private int MaxMalformedRequests => PositiveInt("Pipe:MaxMalformedRequests", 5);
+    private int WriteTimeoutSeconds => PositiveInt("Pipe:WriteTimeoutSeconds", 10);
+    private int MaxConnectionsPerCaller => PositiveInt("Pipe:MaxConnectionsPerCaller", Math.Max(1, MaxInstances / 2));
     private int ElicitationTtlSeconds => int.TryParse(_config["Elicitation:TtlSeconds"], out var n) ? n : 120;
     private bool RequireDistinctApprover =>
         bool.TryParse(_config["Elicitation:RequireDistinctApprover"], out var b) && b;
@@ -329,11 +369,12 @@ public sealed class NamedPipeServer
         var security = _securityFactory.Build();
         _logger.LogInformation("Opening pipe {Pipe} with {Slots} slots", PipeName, MaxInstances);
 
-        var slots = Enumerable.Range(0, MaxInstances).Select(i => AcceptLoopAsync(i, security, ct));
+        var limiter = new PerCallerConnectionLimiter(MaxConnectionsPerCaller);
+        var slots = Enumerable.Range(0, MaxInstances).Select(i => AcceptLoopAsync(i, security, limiter, ct));
         await Task.WhenAll(slots);
     }
 
-    private async Task AcceptLoopAsync(int slot, PipeSecurity security, CancellationToken ct)
+    private async Task AcceptLoopAsync(int slot, PipeSecurity security, PerCallerConnectionLimiter limiter, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -368,8 +409,21 @@ public sealed class NamedPipeServer
                     continue;
                 }
 
-                _logger.LogInformation("Slot {Slot}: client connected SID={Sid}", slot, callerSid);
-                await ServeAsync(stream, () => stream.IsConnected, callerSid, ct);
+                if (!limiter.TryAcquire(callerSid))
+                {
+                    _logger.LogWarning("Slot {Slot}: SID={Sid} is at its connection limit; connection refused", slot, callerSid);
+                    continue;
+                }
+
+                try
+                {
+                    _logger.LogInformation("Slot {Slot}: client connected SID={Sid}", slot, callerSid);
+                    await ServeAsync(stream, () => stream.IsConnected, callerSid, ct);
+                }
+                finally
+                {
+                    limiter.Release(callerSid);
+                }
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -412,6 +466,12 @@ public sealed class NamedPipeServer
         // The reader never blocks on dispatch, so an in-flight elicitation does not deadlock.
         var pending = new ConcurrentDictionary<string, TaskCompletionSource<ElicitationReply>>();
         var writeLock = new SemaphoreSlim(1, 1);
+        // Cancelled when this connection can no longer be used (a write stalled or failed), which
+        // stops the reader. In-flight dispatches keep the service token: a client that merely
+        // disconnected must not abort a call that is already executing.
+        using var connCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var readToken = connCts.Token;
+        var writeTimeout = TimeSpan.FromSeconds(WriteTimeoutSeconds);
         var inflight = new ConcurrentDictionary<Task, byte>();
         int malformed = 0;
         int maxInFlight = MaxInFlightPerConnection;
@@ -420,7 +480,19 @@ public sealed class NamedPipeServer
         async Task WriteFrameLocked(string json)
         {
             await writeLock.WaitAsync(ct);
-            try { await McpFraming.WriteFrameAsync(stream, json, ct); }
+            try
+            {
+                // A client that stops reading must not hold this connection (and a pipe slot) forever.
+                using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                writeCts.CancelAfter(writeTimeout);
+                await McpFraming.WriteFrameAsync(stream, json, writeCts.Token);
+            }
+            catch
+            {
+                // Timed out or failed part-way: the stream may hold half a frame, so it is unusable.
+                try { connCts.Cancel(); } catch (ObjectDisposedException) { }
+                throw;
+            }
             finally { writeLock.Release(); }
         }
 
@@ -466,18 +538,22 @@ public sealed class NamedPipeServer
 
         try
         {
-            while (!ct.IsCancellationRequested && isConnected())
+            while (!readToken.IsCancellationRequested && isConnected())
             {
                 string? frame;
                 try
                 {
                     frame = await McpFraming.ReadFrameAsync(
-                        stream, TimeSpan.FromSeconds(FrameTimeoutSeconds), ct);
+                        stream, TimeSpan.FromSeconds(FrameTimeoutSeconds), readToken);
                 }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                catch (OperationCanceledException) when (!readToken.IsCancellationRequested)
                 {
                     _logger.LogWarning("Partial-frame timeout, closing connection SID={Sid}", callerSid);
                     break;
+                }
+                catch (OperationCanceledException)
+                {
+                    break;   // service stopping, or the connection was torn down after a failed write
                 }
                 catch (InvalidDataException ex)
                 {
