@@ -786,6 +786,167 @@
       },
       "untrustedInputSources": [],
       "maskedFields": []
+    },
+    {
+      "toolId": "set-local-user-enabled",
+      "displayName": "Enable or Disable a Local User",
+      "description": "Enables or disables a local (non-domain) user account. Reversible.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerLocalUserEnabled.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetLocalUserEnabled", "cmdlet": "Set-BrokerLocalUserEnabled", "moduleName": "Set-BrokerLocalUserEnabled", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        { "name": "UserName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[A-Za-z0-9_.-]{1,80}$" } },
+        { "name": "Enabled", "type": "bool", "required": true, "allowlist": { "enumValues": ["true", "false"] } }
+      ],
+      "resourceAllowlist": { "UserName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-hyperv-vm-state",
+      "displayName": "Start or Stop a Hyper-V VM",
+      "description": "Starts or stops a virtual machine. Reversible.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerHyperVVmState.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetHyperVVmState", "cmdlet": "Set-BrokerHyperVVmState", "moduleName": "Set-BrokerHyperVVmState", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        { "name": "VmName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[A-Za-z0-9 _.-]{1,150}$" } },
+        { "name": "Action", "type": "string", "required": true, "allowlist": { "enumValues": ["Start", "Stop"] } }
+      ],
+      "resourceAllowlist": { "VmName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-iis-site-state",
+      "displayName": "Start or Stop an IIS Site",
+      "description": "Starts or stops a web or FTP site. Reversible.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerIisSiteState.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetIisSiteState", "cmdlet": "Set-BrokerIisSiteState", "moduleName": "Set-BrokerIisSiteState", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        { "name": "SiteName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[A-Za-z0-9 _.-]{1,150}$" } },
+        { "name": "Action", "type": "string", "required": true, "allowlist": { "enumValues": ["Start", "Stop"] } }
+      ],
+      "resourceAllowlist": { "SiteName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-cluster-node-state",
+      "displayName": "Pause or Resume a Failover Cluster Node",
+      "description": "Pauses or resumes a cluster node (does not evict/remove it). Reversible.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerClusterNodeState.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetClusterNodeState", "cmdlet": "Set-BrokerClusterNodeState", "moduleName": "Set-BrokerClusterNodeState", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        { "name": "NodeName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[A-Za-z0-9_.-]{1,80}$" } },
+        { "name": "Action", "type": "string", "required": true, "allowlist": { "enumValues": ["Pause", "Resume"] } }
+      ],
+      "resourceAllowlist": { "NodeName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-wsus-update-approval",
+      "displayName": "Approve or Decline a WSUS Update",
+      "description": "Approves or declines a specific update for install. Reversible (can be re-approved/re-declined).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerWsusUpdateApproval.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetWsusUpdateApproval", "cmdlet": "Set-BrokerWsusUpdateApproval", "moduleName": "Set-BrokerWsusUpdateApproval", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        { "name": "UpdateId", "type": "string", "required": true, "allowlist": { "regexPattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" } },
+        { "name": "Action", "type": "string", "required": true, "allowlist": { "enumValues": ["Approve", "Decline"] } }
+      ],
+      "resourceAllowlist": { "UpdateId": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-ad-user-enabled",
+      "displayName": "Enable or Disable an AD User",
+      "description": "Enables or disables a domain user account. Reversible. A fixed denylist (krbtgt, built-in Administrator, the broker's own gMSA) is enforced inside the wrapper.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerAdUserEnabled.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.WriteDirectory", "roleCapabilityName": "SetAdUserEnabled", "cmdlet": "Set-BrokerAdUserEnabled", "moduleName": "Set-BrokerAdUserEnabled", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [
+        { "name": "SamAccountName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[a-zA-Z0-9._-]{1,64}$" } },
+        { "name": "Enabled", "type": "bool", "required": true, "allowlist": { "enumValues": ["true", "false"] } }
+      ],
+      "resourceAllowlist": { "SamAccountName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-ad-computer-enabled",
+      "displayName": "Enable or Disable an AD Computer",
+      "description": "Enables or disables a domain computer account. Reversible. Domain controllers are denied inside the wrapper.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerAdComputerEnabled.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.WriteDirectory", "roleCapabilityName": "SetAdComputerEnabled", "cmdlet": "Set-BrokerAdComputerEnabled", "moduleName": "Set-BrokerAdComputerEnabled", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [
+        { "name": "ComputerName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[a-zA-Z0-9._-]{1,64}$" } },
+        { "name": "Enabled", "type": "bool", "required": true, "allowlist": { "enumValues": ["true", "false"] } }
+      ],
+      "resourceAllowlist": { "ComputerName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-ad-group-membership",
+      "displayName": "Add or Remove an AD Group Member",
+      "description": "Adds or removes a user from a domain group. Reversible. Privileged groups (Domain Admins, Enterprise Admins, Administrators) are denied inside the wrapper regardless of parameters.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerAdGroupMembership.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.WriteDirectory", "roleCapabilityName": "SetAdGroupMembership", "cmdlet": "Set-BrokerAdGroupMembership", "moduleName": "Set-BrokerAdGroupMembership", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [
+        { "name": "GroupName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[a-zA-Z0-9 ._-]{1,64}$" } },
+        { "name": "MemberSamAccountName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[a-zA-Z0-9._-]{1,64}$" } },
+        { "name": "Action", "type": "string", "required": true, "allowlist": { "enumValues": ["Add", "Remove"] } }
+      ],
+      "resourceAllowlist": { "GroupName": [], "MemberSamAccountName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-gpo-status",
+      "displayName": "Set GPO Status",
+      "description": "Enables or disables the computer/user settings portions of a GPO. Reversible.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerGpoStatus.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.WriteDirectory", "roleCapabilityName": "SetGpoStatus", "cmdlet": "Set-BrokerGpoStatus", "moduleName": "Set-BrokerGpoStatus", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [
+        { "name": "GpoName", "type": "string", "required": true, "allowlist": { "regexPattern": "^[A-Za-z0-9 _.-]{1,150}$" } },
+        { "name": "Status", "type": "string", "required": true, "allowlist": { "enumValues": ["AllSettingsEnabled", "AllSettingsDisabled", "UserSettingsDisabled", "ComputerSettingsDisabled"] } }
+      ],
+      "resourceAllowlist": { "GpoName": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-dhcp-scope-state",
+      "displayName": "Activate or Deactivate a DHCP Scope",
+      "description": "Activates or deactivates a scope (does not delete it). Reversible.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerDhcpScopeState.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetDhcpScopeState", "cmdlet": "Set-BrokerDhcpScopeState", "moduleName": "Set-BrokerDhcpScopeState", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        { "name": "ScopeId", "type": "string", "required": true, "allowlist": { "regexPattern": "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$" } },
+        { "name": "Action", "type": "string", "required": true, "allowlist": { "enumValues": ["Activate", "Deactivate"] } }
+      ],
+      "resourceAllowlist": { "ScopeId": [] },
+      "untrustedInputSources": [],
+      "maskedFields": []
     }
   ],
   "workflowPolicies": {
