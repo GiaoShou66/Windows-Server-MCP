@@ -27,7 +27,7 @@ public sealed class BrokerPipeline : IToolCallDispatcher
     private readonly AmsiScanner _amsi;
     private readonly ConsentEngine _consent;
     private readonly ArgvBuilder _argvBuilder;
-    private readonly JeaEndpointClient _jea;
+    private readonly IJeaExecutor _jea;
     private readonly TaintTracker _taint;
     private readonly CorrelationLog _correlationLog;
     private readonly ILogger<BrokerPipeline> _logger;
@@ -39,7 +39,7 @@ public sealed class BrokerPipeline : IToolCallDispatcher
     public BrokerPipeline(
         ManifestStore manifest, ISignatureVerifier signatures, ParameterValidator paramValidator,
         UntrustedSourceGate untrustedGate, RateLimiter rateLimiter, AmsiScanner amsi,
-        ConsentEngine consent, ArgvBuilder argvBuilder, JeaEndpointClient jea,
+        ConsentEngine consent, ArgvBuilder argvBuilder, IJeaExecutor jea,
         TaintTracker taint, CorrelationLog correlationLog, ILogger<BrokerPipeline> logger)
     {
         _manifest = manifest;
@@ -171,7 +171,7 @@ public sealed class BrokerPipeline : IToolCallDispatcher
             context.CorrelationId, tool.JeaMapping.EndpointName, result.ExitCode,
             result.DurationMs, DateTimeOffset.UtcNow.UtcTicks);
 
-        if (!result.Success) return ToolCallResult.Rejected("jea-execution-error");
+        if (!result.Success) return ToolCallResult.Rejected(result.Reason ?? "jea-execution-error");
 
         // Out-of-band correlation: record (correlationId, endpoint, window) so the aggregator
         // can later join this call to its JEA transcript without anything run in-session.

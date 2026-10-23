@@ -94,8 +94,34 @@ builder.Services.AddSingleton(sp =>
     return new RateLimiter(perMin, destPerHour);
 });
 
-// JEA
-builder.Services.AddSingleton<JeaEndpointClient>();
+// JEA: the pipeline only ever sees IJeaExecutor, bounded by global/endpoint/tool limits.
+builder.Services.AddSingleton(sp =>
+{
+    var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    var defaults = new JeaClientOptions();
+    return new JeaEndpointClient(
+        sp.GetRequiredService<ILogger<JeaEndpointClient>>(),
+        new JeaClientOptions(
+            IntSetting(cfg, "Jea:OpenTimeoutMs", defaults.OpenTimeoutMs),
+            IntSetting(cfg, "Jea:OperationTimeoutMs", defaults.OperationTimeoutMs)));
+});
+builder.Services.AddSingleton<IJeaExecutor>(sp =>
+{
+    var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    var d = new JeaExecutionLimits();
+    var limits = new JeaExecutionLimits
+    {
+        MaxConcurrentTotal = IntSetting(cfg, "Jea:Limits:MaxConcurrentTotal", d.MaxConcurrentTotal),
+        MaxConcurrentPerEndpoint = IntSetting(cfg, "Jea:Limits:MaxConcurrentPerEndpoint", d.MaxConcurrentPerEndpoint),
+        MaxConcurrentPerTool = IntSetting(cfg, "Jea:Limits:MaxConcurrentPerTool", d.MaxConcurrentPerTool),
+        MaxQueueLength = IntSetting(cfg, "Jea:Limits:MaxQueueLength", d.MaxQueueLength),
+        QueueWaitTimeout = TimeSpan.FromSeconds(IntSetting(cfg, "Jea:Limits:QueueWaitSeconds", (int)d.QueueWaitTimeout.TotalSeconds)),
+        ExecutionTimeout = TimeSpan.FromSeconds(IntSetting(cfg, "Jea:Limits:ExecutionTimeoutSeconds", (int)d.ExecutionTimeout.TotalSeconds)),
+        MaxResponseBytes = IntSetting(cfg, "Jea:Limits:MaxResponseBytes", d.MaxResponseBytes)
+    };
+    return new BoundedJeaExecutor(
+        sp.GetRequiredService<JeaEndpointClient>(), limits, sp.GetRequiredService<ILogger<BoundedJeaExecutor>>());
+});
 
 // Audit
 builder.Services.AddSingleton(sp =>
@@ -116,3 +142,14 @@ builder.Services.AddHostedService<Worker>();
 var host = builder.Build();
 host.Run();
 return 0;
+
+// Malformed numeric configuration must not silently fall back to a different bound than the
+// operator wrote: an unparsable value stops startup instead of being replaced by a default.
+static int IntSetting(IConfiguration cfg, string key, int fallback)
+{
+    var raw = cfg[key];
+    if (raw is null) return fallback;
+    return int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var v)
+        ? v
+        : throw new InvalidOperationException($"Configuration value '{key}' is not a valid integer.");
+}
