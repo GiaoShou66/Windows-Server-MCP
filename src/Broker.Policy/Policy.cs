@@ -83,11 +83,18 @@ public sealed class ParameterValidator
 {
     public PolicyDecision Validate(ToolManifest tool, IReadOnlyDictionary<string, string> supplied)
     {
-        // reject unknown parameters outright
+        // reject unknown parameters outright. The name is attacker-chosen, so it is echoed back (and
+        // so reaches logs and the audit trail) only when it is a plain identifier.
         var known = tool.Parameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var key in supplied.Keys)
             if (!known.Contains(key))
-                return PolicyDecision.Deny($"unknown-parameter:{key}");
+                return PolicyDecision.Deny($"unknown-parameter:{(IsPlainIdentifier(key) ? key : "invalid-name")}");
+
+        // A scope that names no parameter would never be applied; refuse the tool rather than
+        // run it believing it is scoped.
+        foreach (var scoped in tool.ResourceAllowlist.Keys)
+            if (!known.Contains(scoped))
+                return PolicyDecision.Deny($"resource-scope-unknown-parameter:{scoped}");
 
         foreach (var p in tool.Parameters)
         {
@@ -95,6 +102,10 @@ public sealed class ParameterValidator
             if (!present)
             {
                 if (p.Required) return PolicyDecision.Deny($"missing-required-parameter:{p.Name}");
+
+                // A scoped parameter that is simply left out would skip its scope check entirely.
+                if (tool.ResourceAllowlist.ContainsKey(p.Name))
+                    return PolicyDecision.Deny($"resource-scope-requires-parameter:{p.Name}");
                 continue;
             }
 
@@ -109,15 +120,25 @@ public sealed class ParameterValidator
         return PolicyDecision.Allow();
     }
 
+    private static bool IsPlainIdentifier(string name) =>
+        name.Length is >= 1 and <= 64 && name.All(c => c is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '_' or '.' or '-');
+
     private static string? CheckOne(ToolParameter p, string? value)
     {
         if (value is null) return $"parameter-null:{p.Name}";
 
-        // A control character is never legitimate in any shipped parameter, and .NET's `$`
-        // anchor matches before a trailing "\n", so a regex-valid value could otherwise smuggle
-        // one through. Rejected unconditionally, before any pattern is consulted.
+        // Control characters are never legitimate in any shipped parameter, and .NET's `$` anchor
+        // matches before a trailing "\n", so a regex-valid value could otherwise smuggle one through.
+        // Format characters (bidi overrides, zero-width characters, byte-order marks) and line or
+        // paragraph separators are refused too: they let a value read differently to the human
+        // approving it than to the machine running it. Rejected before any pattern is consulted.
         foreach (var ch in value)
-            if (char.IsControl(ch)) return $"parameter-control-character:{p.Name}";
+        {
+            var category = char.GetUnicodeCategory(ch);
+            if (category is UnicodeCategory.Control or UnicodeCategory.Format
+                or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+                return $"parameter-control-character:{p.Name}";
+        }
 
         if (!ParameterTypes.IsSupported(p.Type)) return $"parameter-type-unsupported:{p.Name}";
 

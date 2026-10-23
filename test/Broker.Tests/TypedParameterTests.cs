@@ -267,3 +267,113 @@ public class ManifestTierHardeningTests
         Assert.True(t.ElicitationRequired);
     }
 }
+
+public class ParameterValidatorHardeningTests
+{
+    private readonly ParameterValidator _v = new();
+
+    private static ToolManifest Tool(bool required, params (string name, List<string> scope)[] scopes)
+    {
+        var t = new ToolManifest
+        {
+            ToolId = "scoped",
+            RiskTierRaw = "write",
+            Parameters = { new ToolParameter { Name = "P", Type = "string", Required = required, Allowlist = new ParameterAllowlist { RegexPattern = "^[a-z]+$" } } }
+        };
+        foreach (var (name, scope) in scopes) t.ResourceAllowlist[name] = scope;
+        return t;
+    }
+
+    [Fact]
+    public void AScopedParameterCannotBeSkippedByOmittingIt()
+    {
+        var tool = Tool(required: false, ("P", new List<string> { "allowed" }));
+
+        var d = _v.Validate(tool, new Dictionary<string, string>());
+
+        Assert.False(d.Allowed);
+        Assert.Equal("resource-scope-requires-parameter:P", d.Reason);
+    }
+
+    [Fact]
+    public void AnEmptyScopeAlsoRequiresTheParameterAndThenDeniesEveryValue()
+    {
+        var tool = Tool(required: false, ("P", new List<string>()));
+
+        Assert.Equal("resource-scope-requires-parameter:P", _v.Validate(tool, new Dictionary<string, string>()).Reason);
+        Assert.Equal("resource-not-allowlisted:P", _v.Validate(tool, new Dictionary<string, string> { ["P"] = "anything" }).Reason);
+    }
+
+    [Fact]
+    public void AScopeNamingAnUndefinedParameterIsRefusedRatherThanSilentlyIgnored()
+    {
+        var tool = Tool(required: true, ("Typo", new List<string> { "x" }));
+
+        var d = _v.Validate(tool, new Dictionary<string, string> { ["P"] = "ok" });
+
+        Assert.False(d.Allowed);
+        Assert.Equal("resource-scope-unknown-parameter:Typo", d.Reason);
+    }
+
+    [Fact]
+    public void ARequiredScopedParameterInScopeIsAllowed()
+    {
+        var tool = Tool(required: true, ("P", new List<string> { "allowed" }));
+        Assert.False(_v.Validate(tool, new Dictionary<string, string> { ["P"] = "other" }).Allowed);
+        Assert.True(tool.Parameters.Count == 1);
+    }
+
+    [Theory]
+    [InlineData("bogus", "unknown-parameter:bogus")]
+    [InlineData("Some_Name-1.x", "unknown-parameter:Some_Name-1.x")]
+    [InlineData("bad\nname", "unknown-parameter:invalid-name")]
+    [InlineData("bad\u202Ename", "unknown-parameter:invalid-name")]
+    [InlineData("has space", "unknown-parameter:invalid-name")]
+    [InlineData("", "unknown-parameter:invalid-name")]
+    public void AnUnknownParameterNameIsEchoedOnlyWhenItIsAPlainIdentifier(string key, string expected)
+    {
+        var d = _v.Validate(Tool(required: false), new Dictionary<string, string> { [key] = "1" });
+        Assert.Equal(expected, d.Reason);
+    }
+
+    [Fact]
+    public void ALongUnknownParameterNameIsNotEchoed()
+    {
+        var d = _v.Validate(Tool(required: false), new Dictionary<string, string> { [new string('a', 200)] = "1" });
+        Assert.Equal("unknown-parameter:invalid-name", d.Reason);
+        Assert.True(d.Reason!.Length < 64);
+    }
+
+    [Theory]
+    [InlineData("\u202E")]          // right-to-left override: reverses how an approver reads the text
+    [InlineData("a\u200Bb")]        // zero-width space
+    [InlineData("a\u200Db")]        // zero-width joiner
+    [InlineData("\uFEFFab")]        // byte-order mark / zero-width no-break space
+    [InlineData("a\u2028b")]        // line separator
+    [InlineData("a\u2029b")]        // paragraph separator
+    [InlineData("a\u0085b")]        // next line (a C1 control)
+    public void CharactersThatCanSpoofWhatAnApproverSeesAreRejected(string value)
+    {
+        var tool = new ToolManifest
+        {
+            ToolId = "free", RiskTierRaw = "read",
+            Parameters = { new ToolParameter { Name = "P", Type = "string", Allowlist = new ParameterAllowlist { RegexPattern = "^.*$" } } }
+        };
+
+        var d = _v.Validate(tool, new Dictionary<string, string> { ["P"] = value });
+
+        Assert.False(d.Allowed, $"U+{(int)value.First(c => c > 127):X4}");
+        Assert.Equal("parameter-control-character:P", d.Reason);
+    }
+
+    [Fact]
+    public void OrdinaryNonAsciiTextIsStillAccepted()
+    {
+        var tool = new ToolManifest
+        {
+            ToolId = "free", RiskTierRaw = "read",
+            Parameters = { new ToolParameter { Name = "P", Type = "string", Allowlist = new ParameterAllowlist { RegexPattern = "^.*$" } } }
+        };
+        Assert.True(_v.Validate(tool, new Dictionary<string, string> { ["P"] = "C:\\Données\\日本語\\файл" }).Allowed);
+    }
+}

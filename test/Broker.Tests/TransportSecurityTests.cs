@@ -134,6 +134,72 @@ public class TransportSecurityTests
         await Task.WhenAny(serve, Task.Delay(1000));
     }
 
+    [Theory]
+    [InlineData("Echo")]                       // upper case
+    [InlineData("a\nb")]                       // newline: would forge a log line
+    [InlineData("has space")]
+    [InlineData("-leading")]
+    [InlineData("trailing-")]
+    [InlineData("double--dash")]
+    [InlineData("under_score")]
+    [InlineData("a\u202Eb")]
+    public async Task AToolIdThatIsNotAPlainIdentifierIsMalformed(string toolId)
+    {
+        var dispatcher = new RecordingDispatcher();
+        var server = Server(dispatcher);
+        var (serverSide, client) = ChannelStream.CreatePair();
+        using var cts = Timeout();
+        var serve = server.ServeAsync(serverSide, () => true, "CALLER", cts.Token);
+
+        await Send(client, new { type = "tools/call", toolId, parameters = new { } }, cts.Token);
+
+        Assert.Equal("malformed-request", Reason(await Read(client, cts.Token)));
+        Assert.Equal(0, dispatcher.Calls);
+
+        cts.Cancel();
+        await Task.WhenAny(serve, Task.Delay(1000));
+    }
+
+    [Fact]
+    public async Task AnOverlongToolIdIsMalformedAndNeverReachesTheLogs()
+    {
+        var dispatcher = new RecordingDispatcher();
+        var server = Server(dispatcher);
+        var (serverSide, client) = ChannelStream.CreatePair();
+        using var cts = Timeout();
+        var serve = server.ServeAsync(serverSide, () => true, "CALLER", cts.Token);
+
+        await Send(client, new { type = "tools/call", toolId = new string('a', 5000), parameters = new { } }, cts.Token);
+
+        Assert.Equal("malformed-request", Reason(await Read(client, cts.Token)));
+        Assert.Equal(0, dispatcher.Calls);
+
+        cts.Cancel();
+        await Task.WhenAny(serve, Task.Delay(1000));
+    }
+
+    [Theory]
+    [InlineData("echo")]
+    [InlineData("list-windows-services")]
+    [InlineData("set-ad-group-membership")]
+    [InlineData("a1-b2-c3")]
+    public async Task ARealToolIdIsAccepted(string toolId)
+    {
+        var dispatcher = new RecordingDispatcher();
+        var server = Server(dispatcher);
+        var (serverSide, client) = ChannelStream.CreatePair();
+        using var cts = Timeout();
+        var serve = server.ServeAsync(serverSide, () => true, "CALLER", cts.Token);
+
+        await Send(client, new { type = "tools/call", toolId, parameters = new { } }, cts.Token);
+
+        Assert.True((await Read(client, cts.Token)).GetProperty("success").GetBoolean());
+        Assert.Equal(toolId, dispatcher.Requests.Single().ToolId);
+
+        cts.Cancel();
+        await Task.WhenAny(serve, Task.Delay(1000));
+    }
+
     [Fact]
     public async Task ARepeatedlyMalformedClientIsDisconnected()
     {

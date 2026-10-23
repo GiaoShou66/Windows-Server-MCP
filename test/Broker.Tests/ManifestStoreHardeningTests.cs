@@ -255,6 +255,18 @@ public sealed class ShippedManifestInvariantTests : IClassFixture<ShippedManifes
     }
 
     [Fact]
+    public void EveryResourceScopeNamesADefinedRequiredParameter()
+    {
+        foreach (var t in _fx.Store.All)
+            foreach (var scoped in t.ResourceAllowlist.Keys)
+            {
+                var p = t.Parameters.SingleOrDefault(x => x.Name == scoped);
+                Assert.True(p is not null, $"{t.ToolId}: scope names undefined parameter '{scoped}'");
+                Assert.True(p!.Required, $"{t.ToolId}: scoped parameter '{scoped}' must be required or the scope can be skipped");
+            }
+    }
+
+    [Fact]
     public void EveryShippedParameterHasASupportedTypeAndAConstraint()
     {
         foreach (var t in _fx.Store.All)

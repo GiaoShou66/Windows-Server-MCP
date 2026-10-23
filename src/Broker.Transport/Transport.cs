@@ -713,11 +713,19 @@ public sealed class NamedPipeServer
         return new ElicitationReply(correlationId, paramHash, approved, callerSid, toolId);
     }
 
+    // Same shape the manifest schema requires of a toolId. Anything else cannot name a tool, and an
+    // arbitrary string must not reach audit events or log lines.
+    private static readonly System.Text.RegularExpressions.Regex ToolIdSyntax =
+        new(@"^[a-z0-9]+(-[a-z0-9]+)*\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     private static ToolCallRequest ParseToolCall(JsonElement root)
     {
-        if (!root.TryGetProperty("toolId", out var id) || id.ValueKind != JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(id.GetString()))
+        if (!root.TryGetProperty("toolId", out var id) || id.ValueKind != JsonValueKind.String)
             throw new InvalidDataException("tools/call missing toolId.");
+
+        var toolId = id.GetString() ?? string.Empty;
+        if (toolId.Length is 0 or > 100 || !ToolIdSyntax.IsMatch(toolId))
+            throw new InvalidDataException("tools/call toolId is not a valid tool identifier.");
 
         var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
         if (root.TryGetProperty("parameters", out var p) && p.ValueKind != JsonValueKind.Null)
@@ -733,7 +741,7 @@ public sealed class NamedPipeServer
             }
         }
 
-        return new ToolCallRequest { ToolId = id.GetString()!, Parameters = parameters };
+        return new ToolCallRequest { ToolId = toolId, Parameters = parameters };
     }
 
     /// <summary>
