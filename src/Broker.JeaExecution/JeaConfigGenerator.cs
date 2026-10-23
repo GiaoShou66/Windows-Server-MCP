@@ -77,6 +77,28 @@ public sealed class JeaConfigGenerator
         var all = tools.ToList();
         foreach (var tool in all) ValidateIdentifiers(tool);
 
+        // register-jea.ps1 registers every .psrc/.pssc in the directory. A file left over from a tool
+        // that was removed or renamed would be registered too, granting something the current manifest
+        // no longer defines. Refuse rather than delete: the operator decides what happens to it.
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tool in all)
+        {
+            expected.Add($"{tool.JeaMapping.RoleCapabilityName}.psrc");
+            expected.Add($"{tool.JeaMapping.EndpointName}.pssc");
+        }
+        if (Directory.Exists(_outputDir))
+        {
+            var stray = Directory.EnumerateFiles(_outputDir)
+                .Select(Path.GetFileName)
+                .Where(n => n is not null && (n.EndsWith(".psrc", StringComparison.OrdinalIgnoreCase) ||
+                                              n.EndsWith(".pssc", StringComparison.OrdinalIgnoreCase)) && !expected.Contains(n))
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            if (stray.Count > 0)
+                throw new InvalidOperationException(
+                    $"Output directory contains generated file(s) that are not part of this manifest: {string.Join(", ", stray)}. " +
+                    "Remove them or use an empty directory; they would otherwise be registered with the others.");
+        }
+
         Directory.CreateDirectory(_outputDir);
         var written = new List<string>();
         var byEndpoint = new Dictionary<string, List<ToolManifest>>(StringComparer.Ordinal);

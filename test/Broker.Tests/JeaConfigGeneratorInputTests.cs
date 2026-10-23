@@ -130,6 +130,45 @@ public sealed class JeaConfigGeneratorInputTests : IDisposable
     }
 
     [Fact]
+    public void AStaleGeneratedFileInTheOutputDirectoryStopsTheRun()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(Path.Combine(_dir, "RemovedTool.psrc"), "@{ VisibleCmdlets = @('Remove-Everything') }");
+        File.WriteAllText(Path.Combine(_dir, "McpBroker.Gone.pssc"), "@{}");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => new JeaConfigGenerator(_dir).GenerateAll(new[] { Tool() }));
+
+        Assert.Contains("RemovedTool.psrc", ex.Message);
+        Assert.Contains("McpBroker.Gone.pssc", ex.Message);
+        // Nothing was generated and nothing was deleted.
+        Assert.False(File.Exists(Path.Combine(_dir, "DoThing.psrc")));
+        Assert.True(File.Exists(Path.Combine(_dir, "RemovedTool.psrc")));
+    }
+
+    [Fact]
+    public void RegeneratingOverTheSameFilesIsAllowedAndOverwritesThem()
+    {
+        var generator = new JeaConfigGenerator(_dir);
+        generator.GenerateAll(new[] { Tool() });
+        File.WriteAllText(Path.Combine(_dir, "DoThing.psrc"), "STALE CONTENT");
+
+        generator.GenerateAll(new[] { Tool() });
+
+        Assert.DoesNotContain("STALE", File.ReadAllText(Path.Combine(_dir, "DoThing.psrc")));
+    }
+
+    [Fact]
+    public void UnrelatedFilesInTheOutputDirectoryAreLeftAlone()
+    {
+        Directory.CreateDirectory(_dir);
+        File.WriteAllText(Path.Combine(_dir, "notes.txt"), "keep me");
+
+        new JeaConfigGenerator(_dir).GenerateAll(new[] { Tool() });
+
+        Assert.Equal("keep me", File.ReadAllText(Path.Combine(_dir, "notes.txt")));
+    }
+
+    [Fact]
     public void EveryShippedToolPassesTheIdentifierChecks()
     {
         using var fx = new ShippedManifestFixture();
