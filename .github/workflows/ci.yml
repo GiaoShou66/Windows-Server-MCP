@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Everything runs here, including the tests that need Windows facilities (WinVerifyTrust against a
+  # real signed binary, AMSI, Windows PowerShell). Nothing may be skipped.
+  windows:
+    name: Build and test (Windows, full suite)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: dotnet restore mcp-broker.sln
+      - run: dotnet build mcp-broker.sln -c Release --no-restore
+      - run: dotnet test mcp-broker.sln -c Release --no-build --logger "trx;LogFileName=windows.trx" --results-directory TestResults
+      - name: No test may be skipped on Windows
+        run: python .github/scripts/check-skips.py TestResults/windows.trx --max-skipped 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-windows
+          path: TestResults
+
+  # Cross-platform subset. The Windows-only tests are reported as skipped with a fixed reason and the
+  # check below fails the job on any OTHER skip, so security tests are never skipped silently here.
+  # Windows-only properties (pipe ACLs, impersonation, WinVerifyTrust, AMSI, WSMan) are NOT tested by this job.
+  linux:
+    name: Build and test (Linux, cross-platform subset)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: dotnet restore mcp-broker.sln -p:EnableWindowsTargeting=true
+      - run: dotnet build mcp-broker.sln -c Release --no-restore -p:EnableWindowsTargeting=true
+      - run: dotnet test mcp-broker.sln -c Release --no-build -p:EnableWindowsTargeting=true --logger "trx;LogFileName=linux.trx" --results-directory TestResults
+      - name: Only Windows-only tests may be skipped
+        run: python .github/scripts/check-skips.py TestResults/linux.trx --allow "Requires Windows"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-linux
+          path: TestResults
