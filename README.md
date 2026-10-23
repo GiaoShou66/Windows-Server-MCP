@@ -42,9 +42,15 @@ attributes, file contents, network responses) can never reach a write/destructiv
 
 ## Shipped tools (`policy/manifest.json`)
 
-49 tools, all read tier, no elicitation. Local tools run as a virtual account on
-`McpBroker.ReadLocal`; AD/domain tools run as the gMSA on `McpBroker.ReadDirectory` so
-queries carry real Kerberos auth. Nothing writes state — every tool is a `Get-*` cmdlet.
+62 tools: 49 read tier (no elicitation) and 13 write tier (human elicitation from a
+distinct approver required). Local read tools run as a virtual account on
+`McpBroker.ReadLocal`; AD/domain read tools run as the gMSA on `McpBroker.ReadDirectory`
+so queries carry real Kerberos auth. Local write tools run on `McpBroker.Write`;
+AD/domain write tools run as the gMSA on `McpBroker.WriteDirectory`. No tool is
+destructive tier — every write is reversible (enable/disable, start/stop,
+pause/resume, approve/decline), never a delete or create.
+
+### Read tier
 
 | Category | Tools |
 |---|---|
@@ -72,6 +78,26 @@ queries carry real Kerberos auth. Nothing writes state — every tool is a `Get-
 | Local security policy | `get-local-security-policy`, `get-audit-policy`, `list-user-rights-assignments`, `get-execution-policy` |
 | Local accounts / groups | `list-windows-services`, `list-local-users`, `list-local-groups`, `list-local-group-members`, `list-scheduled-tasks` |
 | PS Remoting | `get-psremoting-status` |
+
+### Write tier (elicitation required)
+
+Every write tool is reversible and carries an in-wrapper denylist/allowlist beyond the
+broker's own parameter validation where a wrong value could be catastrophic (critical
+services, domain controllers, privileged AD groups, the broker's own gMSA).
+
+| Category | Tools |
+|---|---|
+| Scheduled Tasks | `set-scheduled-task-state` |
+| Windows Services | `set-windows-service-state` (denies AD DS, Netlogon, KDC, time sync, RPC, DCOM, WinRM, the broker's own service) |
+| Windows Firewall | `set-firewall-rule-enabled` |
+| Local accounts | `set-local-user-enabled` |
+| Hyper-V | `set-hyperv-vm-state` |
+| IIS (Web/FTP) | `set-iis-site-state` |
+| Failover Clustering | `set-cluster-node-state` (pause/resume only, never evicts a node) |
+| WSUS | `set-wsus-update-approval` |
+| Active Directory Domain Services | `set-ad-user-enabled` (denies krbtgt, built-in Administrator, the broker's gMSA), `set-ad-computer-enabled` (denies domain controllers), `set-ad-group-membership` (denies Domain Admins/Enterprise Admins/Administrators) |
+| Group Policy | `set-gpo-status` |
+| DHCP Server | `set-dhcp-scope-state` (activate/deactivate only, never deletes a scope) |
 
 `list-adlds-instances` has no dedicated AD LDS enumeration cmdlet to wrap — it discovers
 instances via their `ADAM_<InstanceName>` service registration, the standard way to find
