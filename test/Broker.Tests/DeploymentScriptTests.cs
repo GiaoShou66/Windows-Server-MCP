@@ -262,7 +262,7 @@ public class DeploymentScriptStaticTests
     public void TheAuditOptionIsRemovedOnlyOnTheEnforcedBranch()
     {
         var s = WdacScript();
-        Assert.Equal(1, Regex.Matches(s, @"-Option 3 -Delete").Count);
+        Assert.Single(Regex.Matches(s, @"-Option 3 -Delete"));
         Assert.True(s.IndexOf("-Option 3 -Delete", StringComparison.Ordinal) > s.IndexOf("# ---- Enforced:", StringComparison.Ordinal));
     }
 

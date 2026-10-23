@@ -39,6 +39,9 @@ public sealed class Worker : BackgroundService
         if (!RunStartupSelfCheck())
         {
             _logger.LogCritical("Startup self-check failed; refusing to open pipe listener");
+            // Non-zero so a service manager sees a failed start (recovery actions, alerting),
+            // not a clean stop.
+            Environment.ExitCode = 1;
             _lifetime.StopApplication();
             return;
         }

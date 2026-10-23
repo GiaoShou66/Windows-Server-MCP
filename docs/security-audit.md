@@ -1,167 +1,212 @@
 # Windows-Server-MCP Security Audit
 
-## Scope and evidence
+This document records what was found, what was changed, and, for each item, how strongly the result
+is established. It distinguishes **confirmed vulnerabilities and defects** from **hardening
+improvements**, and it states what was *not* tested.
 
-This review covers the broker request path, manifest loading, policy gates, elicitation,
-JEA invocation, deployment module installation, transcript correlation, and the available
-.NET tests. Local tests run on Windows without a domain controller or registered production
-JEA endpoint. Claims about gMSA, Kerberos, Named Pipe ACL enforcement, WDAC enforcement,
-and installed Windows Server roles therefore remain integration-test assumptions.
+## 1. Scope, method and evidence
 
-## Request path
+Reviewed: the broker request path (`Broker.Transport`, `Broker.Host.BrokerPipeline`), manifest loading
+(`Broker.Registry`), policy gates (`Broker.Policy`), elicitation and approval, JEA invocation
+(`Broker.JeaExecution`), the PowerShell wrappers and generated JEA configuration, the deployment
+scripts, transcript correlation, and the test suite.
 
-1. `NamedPipeServer` captures the caller SID from the pipe token.
-2. `BrokerPipeline` loads the tool from `ManifestStore`.
-3. The backend signature, taint state, parameters, AMSI result, untrusted-source policy,
-   and rate limit are checked in order.
-4. Write/destructive tools require elicitation. Production configuration requires the
-   separate approval pipe; same-pipe confirmation cannot pass `ConsentEngine`.
-5. `ArgvBuilder` creates typed parameters and `JeaEndpointClient` invokes the fixed JEA
-   cmdlet.
-6. Completion is recorded in ETW and the correlation log; transcript joining rejects
-   ambiguous time-window matches.
+A supplied review was treated as a list of hypotheses to check against the source, not as fact. Section
+4 lists where it was wrong or imprecise.
 
-## Confirmed defects remediated
+### Evidence levels
 
-### P0 — Approval forgery via client-supplied identity field
+| Tag | Meaning |
+|---|---|
+| **R→G** | A test was run against the **old** code and **failed**, then passed after the fix. |
+| **C→G** | The test could not compile against the old code (the API itself was the defect), then passed. |
+| **M** | The fix was later broken on purpose (a *mutation*) and at least one test failed. Run by an ad-hoc script, not part of CI. |
+| **S** | Static check of source text. Shows what the code is written to do, not what a real Windows role returns. |
+| **W** | A `[WindowsOnlyFact]` test exists but has **not been executed** by the author (no Windows host). Reported as skipped elsewhere. |
+| **X** | Not tested. |
 
-**File:** `src/Broker.Transport/Transport.cs`, `ParseElicitationReply` (same-pipe elicitation
-reply path used by `NamedPipeServer.ServeAsync`).
-
-**Invariant violated:** authorization must never rely on a client-supplied identity claim.
-The mission brief for this review states this explicitly; the code violated it directly.
-
-**Defect:** `ParseElicitationReply` read an optional `decidedBySid` field from the
-elicitation-reply JSON body and used it as the approver identity whenever present, falling
-back to the connection's real impersonated `callerSid` only when the field was absent:
-
-```csharp
-var decidedBy = root.TryGetProperty("decidedBySid", out var d) ? d.GetString() ?? callerSid : callerSid;
-```
-
-Because the reply travels over the *same pipe connection* the caller itself holds, the
-caller fully controls this field. A caller could self-approve any write/destructive call
-by sending `approved: true` together with a `decidedBySid` naming any SID other than its
-own — defeating `ConsentEngine.Verify`'s unconditional self-approval check, which compares
-`decidedBySid` against `callerSid` but has no way to know the former was never
-authenticated. The separate distinct-approver pipe (`ApprovalPipeServer`, line ~634 in the
-same file) was not affected: it always derives the approver identity from *that* pipe's own
-`RunAsClient` impersonation and never reads an identity field from the message body.
-
-**Root cause:** treating a value from the untrusted message body as equivalent to a value
-derived from OS-level impersonation, for the specific field the authorization decision
-depends on.
-
-**Fix:** removed the client-controllable field entirely. The same-pipe reply path now
-always uses the connection's own `callerSid` for `DecidedBySid`, with no override. As a
-direct consequence, a same-pipe reply to a write/destructive elicitation will now always
-fail `self-approval-forbidden` (`decidedBySid == callerSid` by construction) — same-pipe
-mode can no longer approve a mutating call at all, which is the intended effect: mutating
-tools require the distinct approval pipe.
-
-**Regression test:** `test/Broker.Tests/TransportIntegrationTests.cs`,
-`ForgedDecidedBySidInReplyIsIgnoredAndRealCallerSidIsUsed`. Verified failing against the
-original code (asserts `DecidedBySid == "REAL-CALLER-SID"`; failed with
-`"S-1-5-21-FORGED-DISTINCT-APPROVER"` before the fix) and passing after.
-
-**Severity:** P0. No special privilege or network position is required — any MCP client
-already connected to the main pipe (the normal, expected caller) could exploit this using
-only a message it was already permitted to send. This was the single most severe finding
-in this review; it would have let any caller bypass the entire human-approval control the
-system's threat model depends on.
-
-### Manifest integrity
-
-The registry previously deserialized a hot-reloaded manifest without checking its content.
-The registry now supports a required SHA-256 sidecar and fails closed with an empty active
-registry when the sidecar is missing or does not match. The deployed configuration enables
-this check and includes `policy/manifest.json.sha256`.
-
-This is an integrity check, not signer authentication. The sidecar and manifest must be
-protected by NTFS ACLs and changed only by trusted deployment automation. A signed manifest
-or authenticated deployment service is recommended for production.
-
-### Self-approval
-
-`ConsentEngine` now rejects caller/approver SID equality unconditionally. Distinct
-approver mode is enabled by default. The approval pipe must be ACL-restricted to the
-configured approver SIDs.
-
-### Cancellation
-
-`JeaEndpointClient` registers cancellation handling that calls `PowerShell.Stop()` and
-returns an explicit `jea-cancelled` failure result when cancellation is observed. The
-effectiveness of stopping individual Windows Server cmdlets requires an integration test
-on the supported JEA/WSMan configuration.
-
-### Module deployment consistency
-
-The JEA registration script now compares the SHA-256 hash of each source wrapper module
-with the installed destination file and aborts on mismatch. The source and destination
-directories must still be ACL-protected, and duplicate module names must not be present
-in the effective PowerShell module search path.
-
-### Transcript correlation
-
-Transcript aggregation no longer selects an arbitrary first match. A unique endpoint/time
-match is required; multiple candidates are logged as ambiguous and are not attributed to
-any caller or tool.
-
-### Approval expiry and operation binding
-
-Approval resolution now atomically checks the pending entry's expiry, correlation ID,
-tool ID, and parameter hash before completing the waiting operation. A mismatched or
-expired reply is rejected and cannot win the timeout race. The pipeline also verifies the
-tool ID carried by the approval reply.
-
-### Resource scope
-
-Tool manifests support `resourceAllowlist` entries keyed by parameter name. The broker
-rejects a supplied resource value that is not listed. The shipped write tools currently
-have empty scope lists intentionally, so they remain unavailable until an administrator
-provides explicit resource identifiers and refreshes the manifest integrity sidecar.
-
-### Reparse-point defense
-
-The directory wrapper rejects reparse points in the requested path before enumeration.
-This reduces junction/symbolic-link traversal risk, but it is not a complete race-resistant
-filesystem sandbox; NTFS ACLs and an isolated Windows filesystem test remain required.
-
-## Regression tests
-
-The test suite covers manifest integrity success/failure, self-approval rejection,
-transport elicitation behavior, policy gates, signature verification, JEA serialization,
-transcript/correlation logging, and workflow aggregation.
-
-Last local run:
+### Commands run and results (Linux, .NET SDK 8.0.132)
 
 ```text
-dotnet test .\mcp-broker.sln --no-restore
-Passed: 82
-Failed: 0
-Skipped: 0
+dotnet build mcp-broker.sln -c Release -p:EnableWindowsTargeting=true
+  Build succeeded. 0 Warning(s), 0 Error(s)
+
+dotnet test mcp-broker.sln -c Release -p:EnableWindowsTargeting=true
+  Passed!  - Failed: 0, Passed: 456, Skipped: 8, Total: 464
+
+python3 .github/scripts/check-skips.py <trx> --allow "Requires Windows"
+  464 tests: 456 passed, 0 failed, 8 skipped, 0 other   (exit 0)
 ```
 
-## Residual risks and required validation
+The 8 skipped tests are the `[WindowsOnlyFact]` tests (`SignatureVerifierRealFileTests` ×4,
+`WindowsPipeIdentityTests` ×3, `AmsiScannerTests.RealAmsiOnWindowsAcceptsABenignParameterSet`).
+They are skipped with the reason "Requires Windows … NOT executed here". `.github/workflows/ci.yml`
+defines a Windows job that must run all of them with zero skips; **that workflow has not been run**.
 
-- Deployment now fails closed when wrapper modules or `Broker.Host.exe` are
-  unsigned, missing, or stored in locations writable by broad local principals.
-  The Broker also verifies that the module resolved through `PSModulePath` for
-  JEA has the same content and signer as the manifest-referenced module.
-- A SHA-256 sidecar is not an authenticated signature if an attacker can write both files.
-- `ModulesToImport` is generated by module name; production deployment must still
-  ensure one canonical, ACL-protected module installation path.
-- Windows reparse points and junctions require an isolated filesystem test; the directory
-  wrapper's lexical checks and denylist are not proof of race-resistant containment.
-- `PowerShell.Stop()` requires real JEA tests to establish whether a stopped operation has
-  ceased producing side effects.
-- gMSA identity, Kerberos delegation, JEA role capabilities, and Named Pipe/Approval Pipe
-  ACLs require a domain-joined Windows Server test environment.
-- ETW and transcript files need protected retention or forwarding to an independent log
-  collector. Local logs alone are not tamper-proof.
-- The current taint window is a conservative caller-level approximation, not object-level
-  data-flow tracking.
+Composition root, run for real (not a test): the host was started from a temporary directory with its
+config pointed at the repository manifest. The dependency graph resolved; the manifest loaded **62 tools
+with integrity enforced** from the committed sidecar; the startup self-check failed for all 62 tools (the
+wrapper files are not at their `C:\McpBroker\jea` paths on this machine); the host logged
+`Startup self-check failed; refusing to open pipe listener`, opened no pipe, and exited with code 1.
+`generate-jea` produced 66 files (62 role capabilities, 4 session configurations).
 
-This repository should not be treated as production-ready for high-impact changes until
-the Windows Server integration test matrix passes and deployment ACLs are independently
-reviewed.
+Mutation checks: 24 deliberate breakages of the implementation (unbounded queue, off-by-one limits,
+approver list not enforced, tool comparison removed, masking fail-open, taint re-check removed,
+watcher not subscribed to `Renamed`, wrapper gaining `Select-Object *`, and so on) were each caught by at
+least one test.
+
+## 2. Corrections to earlier statements
+
+- **The test suite was not "missing"; it had been deleted on purpose.** An earlier review of this
+  repository reported documented tests as absent and, by implication, unsupported. The history shows
+  `test/Broker.Tests` was added in `1110100`, extended through `0ffc554`, and deleted in `e14e58c`
+  (the merge commit `e0e9ab8` records that as a decision). It has been restored from `0ffc554`.
+  What *was* wrong: the README and this file kept describing it (28, 67 and 82 tests; experiments on a
+  Windows host) while the tree contained no tests, and some restored tests passed vacuously off Windows.
+- **The `TaskPath` analysis was wrong in its details.** The old pattern's `\\$` is an escaped backslash
+  followed by the end anchor, not a literal `$`. The real defects are in A2 below.
+- **`CaptureCallerSid` did not swallow exceptions.** They propagated and closed the connection (fail
+  closed). The real gap was a *blank* SID flowing through as a caller identity (A10).
+
+## 3. Findings
+
+### 3.1 Confirmed vulnerabilities and defects (fixed)
+
+| ID | Where | Defect | Fix | Tests | Evidence |
+|---|---|---|---|---|---|
+| A1 | `Policy.cs` `ParameterValidator.CheckOne`, `ArgvBuilder.Build` | A range value was parsed with a culture-sensitive `double.TryParse`; `NaN` passes every bound comparison, and `1e1`, `1.5`, `" 5"`, `"+5"` passed validation and then made `int.Parse` throw `FormatException`, which `DispatchAsync` did not catch. Nothing reached PowerShell, but validation and conversion disagreed and an exception escaped the dispatcher. | One definition of each type (`ParameterTypes`: invariant culture, ASCII, canonical) used by both; builder refusals are `InvalidOperationException` without the value. | `TypedParameterTests`, `PipelineSecurityTests.InvalidIntegerIsRejectedBeforeAnyExecution` | R→G (38 failures), M |
+| A2 | `policy/manifest.json` `set-scheduled-task-state.TaskPath` | The pattern `^\\[\\A-Za-z0-9 _.-]*\\$` **rejected the root folder `\`** and **accepted** `\\`, `\.\`, `\..\` and the UNC path `\\server\share\`. | `^\\(?:(?!\.+\\)[A-Za-z0-9 _.-]+\\)*\z`, identical in manifest, wrapper and generated `.psrc` (asserted). | `TaskPathValidationTests` | R→G (8 failures with the old pattern) |
+| A3 | `Registry.cs` `ToolManifest` | An unrecognized `riskTier` mapped to **Read**, and `requiresElicitation: false` **switched approval off for a write tool**. A typo or edited manifest ran a mutating tool unattended and skipped the taint gate. | Unknown tier → most restrictive tier and the tool is not registered; write/destructive always require approval. | `ManifestTierHardeningTests`, `ManifestStoreHardeningTests`, `PipelineSecurityTests` | R→G |
+| A4 | `Registry.cs` `ManifestStore.Reload` | The class documented that hot reload only revokes, but the code swapped in the whole new file, so a live edit could add a tool, lower a tier or loosen an allowlist. | Reload is narrowing-only; other changes are logged and wait for a restart. | `ManifestStoreHardeningTests` | R→G (6 failures), M |
+| A5 | `Registry.cs` watcher | The watcher ignored `Renamed`, so a revocation published by writing a temp file and renaming it over the manifest was **never applied**. | Subscribe to `Renamed`. | `ManifestStoreHardeningTests.ARevocationDeliveredByAtomicRenameIsStillApplied` | R→G (timeout), M. Windows watcher semantics: W (runs in the Windows CI job) |
+| A6 | `BrokerPipeline` | Taint was set only **after** an untrusted-source tool succeeded, never when it failed, and was not re-checked after a human approved. A write approved at T could run after the caller had since read untrusted data. | Taint before execution (also on failure); taint, revocation and signature re-checked immediately before execution. | `PipelineSecurityTests` | R→G, M |
+| A7 | `BrokerPipeline.MaskFields` | A payload that failed to parse was returned **unmasked**; parsing and re-serializing every number as `double` corrupted integers above 2^53. | Mask the JSON tree (exact numbers); a payload that cannot be masked is withheld (`output-masking-failed`). | `PipelineSecurityTests`, `OutputSchemaInventoryTests` | R→G, M |
+| A8 | `BrokerPipeline`, `JeaEndpointClient` | A throwing signature verifier, a validator regex timeout, a throwing executor, a failing elicitation channel, or a failing correlation log (**after the call had already executed**) escaped `DispatchAsync` as an exception. | Every gate is guarded and a throw is a rejection; an audit-sink failure after execution is logged and does not hide the result. | `PipelineSecurityTests` | R→G |
+| A9 | `policy/manifest.json.sha256` | The committed hash was computed over a CRLF working copy while git stores LF, so any checkout without CRLF conversion failed the integrity check and the broker loaded **zero tools**. | `.gitattributes` pins the policy files to LF; sidecar regenerated; a test compares the committed hash with the committed bytes. | `ShippedManifestInvariantTests`, `ShippedManifestFixture` | Found by the failing fixture |
+| A10 | `Transport.cs` | A blank impersonated SID was served as a caller identity; unknown message types were treated as tool calls; non-boolean `approved` threw; `parameters` that was not an object was silently dropped; nested/`null`/duplicate parameter values were accepted; JSON `true` became `"True"` (rejected by the lower-case enum). | Refuse blank identity; strict message parser; only the literal `true` approves; scalars only, duplicates rejected; booleans canonicalized. | `TransportSecurityTests` | C→G, M |
+| A11 | `ApprovalPipeServer` | The pipe ACL always admits the service's own identity, and nothing checked an approver against `ApproverSids` before consuming the pending request; approvers were shown only an opaque hash, so they could not review what they approved. | Replies from SIDs outside the list are ignored; the validated parameters are included in the approval request. | `ApprovalPipeServeTests` | C→G, M |
+| A12 | `Policy.cs` `ConsentEngine.Verify` | `expectedToolId`/`replyToolId` were optional (default `null` skipped the comparison). The pipeline always passed them, so this was latent. | Mandatory parameters, single overload; blank tool/caller/approver fails closed; the approval hash now covers tool + caller + parameters. | `ConsentEngineToolBindingTests`, `PipelineSecurityTests` | C→G, M |
+| A13 | `Policy.cs` `AmsiScanner` | `EnsureInitialized()` ran outside the `try`, so a missing `amsi.dll` threw `DllNotFoundException` out of `Scan`; administrator-blocked results (0x4000–0x4FFF) were treated as clean; no way to fail closed. | Initialization failure is a decision; admin-blocked is denied; `Amsi:Mode` `BestEffort` (default, behaviour unchanged) or `Strict`. | `AmsiScannerTests`, `PipelineSecurityTests` | R→G (probe), M |
+| A14 | `JeaEndpointClient` | `RunspaceFactory.CreateRunspace` was outside the `try`, so a session-setup failure threw out of the pipeline (3 restored tests failed on it off Windows); raw PowerShell error text was placed in the result payload; no WSMan timeouts; every call occupied a thread with no bound. | Creation inside the `try`; fixed reason codes only; open/operation timeouts; the `IJeaExecutor` seam and `BoundedJeaExecutor`. | `JeaEndpointClientFailureTests`, `BoundedJeaExecutorTests` | R→G (3 failures), M |
+| A15 | `RateLimiter`, `TaintTracker`, `Transport.cs` | No global rate limit (many callers could collectively exhaust the host); per-caller state never pruned; a denied call still consumed general budget; no cap on in-flight requests, stalled writes, or connections per caller; a client that stopped reading held a pipe slot forever. | Global budget, pruning, deny-consumes-nothing; per-connection in-flight cap; write timeout that tears the connection down; per-caller connection cap. | `TaintTrackerBehaviourTests`, `RateLimiterBehaviourTests`, `TransportSecurityTests`, `TransportResourceLimitTests` | C→G, M |
+| A16 | `Get-BrokerNetworkControllerConfig.psm1`, `Get-BrokerJeaEndpoints.psm1` | `Node = $nc.Node` passed an unprojected object graph (a remote call deserializes every property and the broker flattens all of it); `Get-BrokerJeaEndpoints` documented its output as "non-sensitive" while returning `RunAsUser` and `Permission`. | Node projected to names; comment corrected; fields classified. | `NetworkControllerProjectionTests`, `OutputSchemaInventoryTests` | S, M. The real Network Controller cmdlet is **X** |
+| A17 | `deploy/setup-wdac.ps1` | The policy was generated from the MCP directory alone: enforced, it would **block Windows itself**. "Enforced" regenerated a policy rather than promoting the audited one, and nothing gated the switch. A first draft of the new gate also had a `TryParse` overload bug that made it throw every time (found only because the function was executed). | Merge with a Windows base policy (refuse without one); promote the saved audit artifact; readiness gate; typed confirmation; Boot Audit on Failure; rollback notes first; never deploys. | `WdacReadinessTests` (22, executed), `DeploymentScriptStaticTests` | R→G for the gate logic. The script end to end, event queries and CiTool: **X** |
+| A19 | `Worker.cs`, `Program.cs` | A failed startup self-check stopped the host but **exited 0**, so a service manager saw a clean stop (no recovery action, no alert). | `Environment.ExitCode = 1` on a failed self-check; `Program.cs` returns it. | Checked by running the host (see section 1); no automated test | Executed manually |
+| A18 | `test/` | The suite was removed from the tree (see section 2); four restored tests passed vacuously when the fixture file was absent. | Restored; Windows-only tests are explicit skips; CI forbids unexplained skips. | `.github/scripts/check-skips.py` | Script validated locally in all three directions |
+
+### 3.2 Hardening (no specific vulnerability claimed)
+
+- `PipePrincipals` refuses broad principals (Everyone, Authenticated Users, Anonymous, BUILTIN\Users,
+  Domain Users/Guests/Computers, ...) and malformed SIDs as pipe clients (ASCII-only SID syntax).
+- The validator rejects `null` and any control character for every parameter, because .NET's `$` anchor
+  matches before a trailing newline.
+- An approval is bound to correlation id, tool, and a hash of tool + caller + parameters.
+- `ParameterTypes`, `AmsiMode`, `JeaExecutionLimits` and every numeric config value are validated at
+  startup; an unparsable value stops the service.
+- Read-tier output inventory (`docs/read-tier-output-inventory.md`) with checks that every wrapper uses an
+  explicit projection, emits no credential or key material, executes no dynamic code, and invokes only the
+  external executables its manifest entry allowlists.
+
+## 4. Hypotheses from the supplied review
+
+| Claim | Result |
+|---|---|
+| Documented tests are absent | Absent from the tree, but deleted deliberately and recoverable from history. Restored. |
+| `TaskPath` pattern is wrong | True, for different reasons than stated (A2). |
+| `ConsentEngine.Verify` tool id is optional | True and fixed (A12); the pipeline always supplied it. |
+| `ArgvBuilder` can throw uncaught `FormatException` | True; root cause was validator/converter disagreement (A1). |
+| `CaptureCallerSid` swallows exceptions | **Not true**; a blank SID was the real issue (A10). |
+| AMSI fails open | True by design; now explicit and configurable. It also threw when `amsi.dll` was missing (A13). |
+| Taint is caller-level and coarse | True, and it also had ordering gaps (A6). Still caller-level; see 7. |
+| No global rate/resource limits | True (A15). |
+| `register-jea.ps1` unregister/register race | Plausible deploy-time window; **not changed**, listed in 7. |
+| Read-tier leakage | One real instance (A16); the rest is documented, not a vulnerability (see inventory). |
+
+## 5. Verified correct, no change needed
+
+Read and tested: the P0 fix (the approver identity on the same-pipe reply path is the connection's own
+SID; `ForgedDecidedBySidInReplyIsIgnoredAndRealCallerSidIsUsed`); unconditional self-approval refusal;
+server-generated correlation ids; argv-only invocation with no composed command string; the untrusted-source
+gate running before elicitation with no override; signature re-check on every call; frame length bounds;
+the manifest integrity check failing closed.
+
+### Original P0 (kept for the record)
+
+`ParseElicitationReply` once read an optional `decidedBySid` from the reply JSON and used it as the
+approver, so a caller could approve its own write by claiming another SID. It now always uses the
+connection's impersonated SID. Authorization must never rely on an identity claim in a message body.
+
+## 6. Test inventory
+
+464 tests in `test/Broker.Tests`. Counts by area (one Linux run; CI is the record):
+
+| Area | Test classes | Tests |
+|---|---|---|
+| Approval, consent, router | `ConsentEngineTests`, `ConsentEngineToolBindingTests`, `ElicitationRouterTests`, `ElicitationRouterBindingTests`, `ApprovalPipeServeTests` | 42 |
+| Pipeline gates and fail-closed behaviour | `PipelineSecurityTests`, `BrokerPipelineTests` | 63 |
+| Parameters, types, paths | `ParameterValidatorTests`, `TypedParameterTests`, `TaskPathValidationTests`, `UntrustedSourceGateTests` | 112 |
+| Transport and identity | `TransportIntegrationTests`, `TransportSecurityTests`, `TransportResourceLimitTests`, `PipePrincipalTests`, `McpFramingTests`, `WindowsPipeIdentityTests` (W) | 64 |
+| Limits, taint, AMSI | `BoundedJeaExecutorTests`, `JeaEndpointClientFailureTests`, `TaintTrackerBehaviourTests`, `TaintTrackerTests`, `RateLimiterBehaviourTests`, `RateLimiterTests`, `AmsiScannerTests` | 70 |
+| Manifest and registry | `ManifestStoreHardeningTests`, `ManifestStoreRevocationTests`, `ManifestIntegrityTests`, `ManifestTierHardeningTests`, `ShippedManifestInvariantTests`, `CorrelationLogTests`, `SignatureVerifierRealFileTests` (W) | 44 |
+| JEA configuration and wrappers | `JeaConfigGeneratorTests`, `JeaEndpointClientSerializationTests`, `OutputSchemaInventoryTests`, `WrapperHygieneTests`, `NetworkControllerProjectionTests` (S) | 37 |
+| Deployment scripts | `WdacReadinessTests` (executed PowerShell), `DeploymentScriptStaticTests` (parse + AST) | 29 |
+| Workflows | `WorkflowTests` | 3 |
+
+(W) = Windows-only tests present in that class, skipped here. (S) = static analysis of source text.
+
+## 7. Remaining risks and limitations
+
+- **Not verified end to end.** WSMan loopback into a real registered JEA endpoint; gMSA/Kerberos and
+  delegation; a real pipe ACL refusing a *different* principal (the Windows tests use a same-user client);
+  AMSI with a real provider; every wrapper's output against a real AD/DNS/DHCP/Hyper-V/IIS/etc. role; WDAC
+  enforcement and rollback; the Windows CI job and `WindowsPipeIdentityTests`. These need a domain-joined
+  Windows Server test environment.
+- **`PowerShell.Stop()` is best effort.** A timeout is reported as `jea-timeout` (outcome unknown) and the
+  slot stays occupied until the call returns. A call blocked in `Runspace.Open()` cannot be interrupted;
+  the WSMan open timeout bounds it. Treat a timeout or disconnect as an uncertain outcome.
+- **Taint is per caller, not per value.** It cannot tell which later parameter came from which earlier
+  output. Many read tools return free text that others can author (VM, service, task and share names) and
+  are deliberately **not** tagged untrusted, because tagging would block the list-then-act workflow for
+  five minutes after every read. The human approver, who now sees the parameters, is the control. A new
+  such tool must record this decision or the inventory test fails. Provenance-aware taint would be the real
+  fix and is not attempted.
+- **AMSI is supplementary.** In `BestEffort` mode a host without a provider gets no AMSI protection.
+- **Manifest integrity is a hash, not a signature.** An attacker who can write both the manifest and its
+  sidecar defeats it. Protect both with NTFS ACLs; prefer a signed manifest.
+- **Local logs are not tamper-proof.** ETW, transcripts and the correlation log need forwarding to an
+  independent collector.
+- **Reparse-point and denylist checks in `Get-BrokerListDirectory`** are lexical and not race-resistant.
+- **`register-jea.ps1`** unregisters then registers an endpoint; during that window the endpoint is absent.
+  Not changed here.
+- **`jea/generated` contains 51 stale tracked files** although the directory is git-ignored. Regenerate;
+  never deploy them as-is.
+- **Free-text fields** such as `Description` and names are returned as written; they are classified in the
+  inventory but not sanitized.
+- **The approver's view is only as good as the approver's client.** The broker now sends the validated
+  parameters; no approver UI exists in this repository.
+
+## 8. Breaking changes and migration
+
+- `ConsentEngine.Verify` requires `expectedToolId` and `replyToolId` (compile error for old callers).
+  `ConsentEngine.HashOperation` replaces `HashParameters` in the pipeline; an approver client that
+  recomputed the old hash must be updated (it echoes the hash it was sent, so a client that does not
+  recompute is unaffected).
+- `ElicitationContext` and `PendingElicitation` gained an optional `Parameters`; the approval and
+  elicitation request frames gained `parameters` (and `toolId` on the same-pipe frame).
+- `BrokerPipeline` takes an `IJeaExecutor`; `JeaEndpointClient` is wrapped by `BoundedJeaExecutor` in
+  `Program.cs`. `JeaEndpointClient`'s constructor gained an optional options argument.
+- `RateLimiter` and `TaintTracker` constructors gained optional parameters (global limit, clock).
+- Behaviour: write tools with `requiresElicitation: false` now ask for approval; manifest tools with an
+  unrecognized tier are not registered; hot reload no longer applies additions or loosening; new defaults
+  apply (global 600 calls/min, 8/4/2 JEA concurrency, 16 in-flight per connection, 4 connections per
+  caller, 10 s write timeout). JSON `true`/`false` parameters are now accepted as `"true"`/`"false"`.
+  The wrapper `Get-BrokerNetworkControllerConfig` returns node names instead of node objects. Wrappers
+  must be re-signed after these edits.
+- Operators: regenerate the manifest sidecar after any manifest edit; set `Amsi:Mode` deliberately; review
+  the new `Jea:Limits:*` and `Pipe:*` defaults for the expected load.
+
+## 9. Readiness
+
+Ready for review. **Not ready for production use of the write tools.** The pieces that carry the trust
+decision (WSMan/JEA execution, gMSA identity, real ACL enforcement, WDAC) have no test coverage here and
+need the Windows Server integration matrix in `docs/security-hardening.md` to pass first.

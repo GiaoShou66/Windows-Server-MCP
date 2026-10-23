@@ -148,7 +148,7 @@ builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
 host.Run();
-return 0;
+return Environment.ExitCode;
 
 // Malformed numeric configuration must not silently fall back to a different bound than the
 // operator wrote: an unparsable value stops startup instead of being replaced by a default.
