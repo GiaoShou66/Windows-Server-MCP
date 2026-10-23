@@ -1,0 +1,599 @@
+{
+  "description": "Output schema and sensitivity classification of every read-tier tool. Checked against the PowerShell wrappers and policy/manifest.json by OutputSchemaInventoryTests. This is static analysis of the checked-in wrappers; it is NOT a record of output captured from a real Windows Server role.",
+  "classes": {
+    "operational": "Status values, counters, enums, timestamps, sizes.",
+    "object-name": "Names/labels of OS, AD or hypervisor objects (authored by administrators or third parties).",
+    "free-text": "Descriptions and other long-form text.",
+    "account-identity": "Account names, display names, e-mail addresses, titles, departments.",
+    "account-activity": "Last logon, password expiry.",
+    "security-identifier": "SIDs, distinguished names, principal lists that contain SIDs.",
+    "security-config": "Security policy values, ACL/run-as principal names, certificate thumbprints.",
+    "network-identifier": "IP and MAC addresses, scope ids, bindings, URLs, host names.",
+    "filesystem-path": "Local or UNC paths and file names.",
+    "secret": "Credentials, keys, recovery material. No tool may ever return a field of this class."
+  },
+  "tools": {
+    "list-jea-endpoints": {
+      "cmdlet": "Get-BrokerJeaEndpoints",
+      "fields": {
+        "Name": "object-name",
+        "RunAsUser": "security-config",
+        "Permission": "security-config",
+        "LanguageMode": "operational"
+      }
+    },
+    "query-ad-user": {
+      "cmdlet": "Get-BrokerAdUser",
+      "fields": {
+        "SamAccountName": "account-identity",
+        "DisplayName": "account-identity",
+        "Enabled": "operational",
+        "LastLogonDate": "account-activity",
+        "Department": "account-identity",
+        "Title": "account-identity",
+        "objectSid": "security-identifier",
+        "distinguishedName": "security-identifier"
+      },
+      "untrustedText": [
+        "DisplayName",
+        "Department",
+        "Title"
+      ]
+    },
+    "summarize-transcript-logs": {
+      "cmdlet": "Get-BrokerTranscriptSummary",
+      "fields": {
+        "Date": "operational",
+        "TranscriptCount": "operational"
+      }
+    },
+    "list-windows-features": {
+      "cmdlet": "Get-BrokerWindowsFeatures",
+      "fields": {
+        "Name": "object-name",
+        "DisplayName": "object-name",
+        "Installed": "operational",
+        "FeatureType": "operational"
+      }
+    },
+    "list-group-policies": {
+      "cmdlet": "Get-BrokerGroupPolicies",
+      "fields": {
+        "DisplayName": "object-name",
+        "Id": "object-name",
+        "GpoStatus": "operational",
+        "CreationTime": "operational",
+        "ModificationTime": "operational"
+      },
+      "untrustedText": [
+        "DisplayName"
+      ]
+    },
+    "list-iis-sites": {
+      "cmdlet": "Get-BrokerIisSites",
+      "fields": {
+        "Name": "object-name",
+        "Id": "operational",
+        "State": "operational",
+        "PhysicalPath": "filesystem-path",
+        "Bindings": "network-identifier",
+        "ApplicationPool": "operational"
+      },
+      "untrustedText": [
+        "Name",
+        "PhysicalPath",
+        "Bindings"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-ad-computers": {
+      "cmdlet": "Get-BrokerAdComputers",
+      "fields": {
+        "Name": "object-name",
+        "OperatingSystem": "operational",
+        "LastLogonDate": "account-activity",
+        "Enabled": "operational",
+        "objectSid": "security-identifier"
+      },
+      "untrustedText": [
+        "Name",
+        "OperatingSystem"
+      ]
+    },
+    "list-ad-groups": {
+      "cmdlet": "Get-BrokerAdGroups",
+      "fields": {
+        "Name": "object-name",
+        "GroupCategory": "operational",
+        "GroupScope": "operational",
+        "objectSid": "security-identifier"
+      },
+      "untrustedText": [
+        "Name"
+      ]
+    },
+    "list-certificate-authorities": {
+      "cmdlet": "Get-BrokerCertificateAuthorities",
+      "fields": {
+        "Name": "object-name",
+        "ComputerName": "network-identifier",
+        "IsRoot": "operational",
+        "DisplayName": "object-name"
+      }
+    },
+    "list-adfs-relying-parties": {
+      "cmdlet": "Get-BrokerAdfsRelyingParties",
+      "fields": {
+        "Name": "object-name",
+        "Identifier": "object-name",
+        "Enabled": "operational"
+      }
+    },
+    "list-dhcp-scopes": {
+      "cmdlet": "Get-BrokerDhcpScopes",
+      "fields": {
+        "ScopeId": "network-identifier",
+        "Name": "object-name",
+        "State": "operational",
+        "StartRange": "network-identifier",
+        "EndRange": "network-identifier"
+      },
+      "untrustedText": [
+        "Name"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-dns-zones": {
+      "cmdlet": "Get-BrokerDnsZones",
+      "fields": {
+        "ZoneName": "object-name",
+        "ZoneType": "operational",
+        "IsDsIntegrated": "operational",
+        "IsReverseLookupZone": "operational"
+      },
+      "untrustedText": [
+        "ZoneName"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-smb-shares": {
+      "cmdlet": "Get-BrokerSmbShares",
+      "fields": {
+        "Name": "object-name",
+        "Path": "filesystem-path",
+        "Description": "free-text",
+        "ShareType": "operational"
+      },
+      "untrustedText": [
+        "Name",
+        "Path",
+        "Description"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-disks": {
+      "cmdlet": "Get-BrokerDisks",
+      "fields": {
+        "Number": "operational",
+        "FriendlyName": "object-name",
+        "SizeBytes": "operational",
+        "HealthStatus": "operational",
+        "PartitionStyle": "operational"
+      }
+    },
+    "list-storage-pools": {
+      "cmdlet": "Get-BrokerStoragePools",
+      "fields": {
+        "FriendlyName": "object-name",
+        "HealthStatus": "operational",
+        "SizeBytes": "operational",
+        "AllocatedBytes": "operational"
+      }
+    },
+    "list-hyperv-vms": {
+      "cmdlet": "Get-BrokerHyperVVms",
+      "fields": {
+        "Name": "object-name",
+        "State": "operational",
+        "CPUUsage": "operational",
+        "MemoryAssignedBytes": "operational",
+        "Uptime": "operational"
+      },
+      "untrustedText": [
+        "Name"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-printers": {
+      "cmdlet": "Get-BrokerPrinters",
+      "fields": {
+        "Name": "object-name",
+        "DriverName": "object-name",
+        "PortName": "object-name",
+        "Shared": "operational",
+        "PrinterStatus": "operational"
+      },
+      "untrustedText": [
+        "Name",
+        "DriverName",
+        "PortName"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-rds-collections": {
+      "cmdlet": "Get-BrokerRdsCollections",
+      "fields": {
+        "CollectionName": "object-name",
+        "CollectionType": "operational",
+        "Size": "operational"
+      },
+      "untrustedText": [
+        "CollectionName"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-wsus-updates": {
+      "cmdlet": "Get-BrokerWsusUpdates",
+      "fields": {
+        "Title": "object-name",
+        "Classification": "operational",
+        "KnowledgeBaseArticles": "operational",
+        "IsDeclined": "operational"
+      },
+      "untrustedText": [
+        "Title",
+        "KnowledgeBaseArticles"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-wds-boot-images": {
+      "cmdlet": "Get-BrokerWdsBootImages",
+      "fields": {
+        "ImageName": "object-name",
+        "Architecture": "operational",
+        "FileName": "filesystem-path"
+      },
+      "untrustedText": [
+        "ImageName",
+        "FileName"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-cluster-nodes": {
+      "cmdlet": "Get-BrokerClusterNodes",
+      "fields": {
+        "Name": "object-name",
+        "State": "operational",
+        "DynamicWeight": "operational"
+      },
+      "untrustedText": [
+        "Name"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-bitlocker-volumes": {
+      "cmdlet": "Get-BrokerBitlockerVolumes",
+      "fields": {
+        "MountPoint": "object-name",
+        "VolumeStatus": "operational",
+        "ProtectionStatus": "operational",
+        "EncryptionPercentage": "operational"
+      }
+    },
+    "list-firewall-rules": {
+      "cmdlet": "Get-BrokerFirewallRules",
+      "fields": {
+        "Name": "security-config",
+        "DisplayName": "security-config",
+        "Direction": "security-config",
+        "Action": "security-config",
+        "Profile": "security-config"
+      },
+      "untrustedText": [
+        "Name",
+        "DisplayName"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-nlb-clusters": {
+      "cmdlet": "Get-BrokerNlbClusters",
+      "fields": {
+        "ClusterName": "object-name",
+        "ClusterIP": "network-identifier",
+        "ClusterMode": "operational"
+      }
+    },
+    "list-network-adapters": {
+      "cmdlet": "Get-BrokerNetworkAdapters",
+      "fields": {
+        "Name": "object-name",
+        "Status": "operational",
+        "LinkSpeed": "operational",
+        "MacAddress": "network-identifier",
+        "IPv4Address": "network-identifier"
+      }
+    },
+    "list-windows-services": {
+      "cmdlet": "Get-BrokerWindowsServices",
+      "fields": {
+        "Name": "object-name",
+        "DisplayName": "object-name",
+        "Status": "operational",
+        "StartType": "operational"
+      },
+      "untrustedText": [
+        "Name",
+        "DisplayName"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-local-users": {
+      "cmdlet": "Get-BrokerLocalUsers",
+      "fields": {
+        "Name": "object-name",
+        "Enabled": "operational",
+        "LastLogon": "account-activity",
+        "PasswordExpires": "account-activity",
+        "SID": "security-identifier"
+      },
+      "untrustedText": [
+        "Name"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-scheduled-tasks": {
+      "cmdlet": "Get-BrokerScheduledTasks",
+      "fields": {
+        "TaskName": "object-name",
+        "TaskPath": "object-name",
+        "State": "operational",
+        "Author": "account-identity"
+      },
+      "untrustedText": [
+        "TaskName",
+        "TaskPath",
+        "Author"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-adlds-instances": {
+      "cmdlet": "Get-BrokerAdldsInstances",
+      "fields": {
+        "InstanceName": "object-name",
+        "ServiceName": "object-name",
+        "Status": "operational"
+      }
+    },
+    "list-rms-superusers": {
+      "cmdlet": "Get-BrokerRmsSuperUsers",
+      "fields": {
+        "Email": "account-identity",
+        "Enabled": "operational"
+      },
+      "untrustedText": [
+        "Email"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "get-hgs-status": {
+      "cmdlet": "Get-BrokerHgsStatus",
+      "fields": {
+        "HgsServerOperationMode": "operational",
+        "AttestationUrl": "network-identifier",
+        "KeyProtectionUrl": "network-identifier"
+      }
+    },
+    "get-network-controller-config": {
+      "cmdlet": "Get-BrokerNetworkControllerConfig",
+      "fields": {
+        "RestIpAddress": "network-identifier",
+        "Node": "object-name",
+        "ServerCertificate": "security-config"
+      }
+    },
+    "get-remote-access-status": {
+      "cmdlet": "Get-BrokerRemoteAccessStatus",
+      "fields": {
+        "VpnStatus": "security-config",
+        "DAStatus": "security-config",
+        "RoutingStatus": "security-config"
+      }
+    },
+    "list-storage-migration-jobs": {
+      "cmdlet": "Get-BrokerStorageMigrationJobs",
+      "fields": {
+        "Name": "object-name",
+        "State": "operational"
+      },
+      "untrustedText": [
+        "Name"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-system-insights-capabilities": {
+      "cmdlet": "Get-BrokerSystemInsightsCapabilities",
+      "fields": {
+        "Name": "object-name",
+        "Enabled": "operational"
+      }
+    },
+    "get-domain-password-policy": {
+      "cmdlet": "Get-BrokerDomainPasswordPolicy",
+      "fields": {
+        "MinPasswordLength": "security-config",
+        "MinPasswordAge": "security-config",
+        "MaxPasswordAge": "security-config",
+        "PasswordHistoryCount": "security-config",
+        "ComplexityEnabled": "security-config",
+        "ReversibleEncryptionEnabled": "security-config",
+        "LockoutThreshold": "security-config",
+        "LockoutDuration": "security-config",
+        "LockoutObservationWindow": "security-config"
+      }
+    },
+    "list-fine-grained-password-policies": {
+      "cmdlet": "Get-BrokerFineGrainedPasswordPolicies",
+      "fields": {
+        "Name": "security-config",
+        "Precedence": "security-config",
+        "MinPasswordLength": "security-config",
+        "ComplexityEnabled": "security-config",
+        "LockoutThreshold": "security-config"
+      },
+      "untrustedText": [
+        "Name"
+      ]
+    },
+    "get-local-security-policy": {
+      "cmdlet": "Get-BrokerLocalSecurityPolicy",
+      "fields": {
+        "MinimumPasswordAge": "security-config",
+        "MaximumPasswordAge": "security-config",
+        "MinimumPasswordLength": "security-config",
+        "PasswordComplexity": "security-config",
+        "PasswordHistorySize": "security-config",
+        "LockoutBadCount": "security-config",
+        "ResetLockoutCount": "security-config",
+        "LockoutDuration": "security-config"
+      }
+    },
+    "get-audit-policy": {
+      "cmdlet": "Get-BrokerAuditPolicy",
+      "fields": {
+        "Subcategory": "security-config",
+        "AuditCondition": "security-config"
+      }
+    },
+    "list-user-rights-assignments": {
+      "cmdlet": "Get-BrokerUserRightsAssignments",
+      "fields": {
+        "Privilege": "operational",
+        "AssignedTo": "security-identifier"
+      }
+    },
+    "list-local-groups": {
+      "cmdlet": "Get-BrokerLocalGroups",
+      "fields": {
+        "Name": "object-name",
+        "Description": "free-text",
+        "SID": "security-identifier"
+      },
+      "untrustedText": [
+        "Name",
+        "Description"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-local-group-members": {
+      "cmdlet": "Get-BrokerLocalGroupMembers",
+      "fields": {
+        "Name": "object-name",
+        "ObjectClass": "operational",
+        "PrincipalSource": "operational"
+      },
+      "untrustedText": [
+        "Name"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "list-ad-organizational-units": {
+      "cmdlet": "Get-BrokerAdOrganizationalUnits",
+      "fields": {
+        "Name": "object-name",
+        "DistinguishedName": "security-identifier"
+      },
+      "untrustedText": [
+        "Name"
+      ]
+    },
+    "list-directory-contents": {
+      "cmdlet": "Get-BrokerListDirectory",
+      "fields": {
+        "Name": "object-name",
+        "FullName": "filesystem-path",
+        "IsDirectory": "operational",
+        "LengthBytes": "operational",
+        "LastWriteTime": "operational"
+      },
+      "untrustedText": [
+        "Name",
+        "FullName"
+      ]
+    },
+    "list-ftp-sites": {
+      "cmdlet": "Get-BrokerFtpSites",
+      "fields": {
+        "Name": "object-name",
+        "State": "operational",
+        "PhysicalPath": "filesystem-path",
+        "FtpBindings": "network-identifier"
+      },
+      "untrustedText": [
+        "Name",
+        "PhysicalPath",
+        "FtpBindings"
+      ],
+      "taintDecision": "accepted-untagged",
+      "taintDecisionReason": "Accepted: tagging would make the core list-then-act workflow unusable under caller-level taint; the human approver reviewing the exact tool and parameters is the control. See docs/security-audit.md."
+    },
+    "get-execution-policy": {
+      "cmdlet": "Get-BrokerExecutionPolicy",
+      "fields": {
+        "Scope": "security-config",
+        "ExecutionPolicy": "security-config"
+      }
+    },
+    "get-psremoting-status": {
+      "cmdlet": "Get-BrokerPsRemotingStatus",
+      "fields": {
+        "Transport": "operational",
+        "Address": "network-identifier",
+        "Port": "operational",
+        "Enabled": "operational",
+        "ServiceStatus": "operational",
+        "StartType": "operational",
+        "Listeners": "operational"
+      }
+    },
+    "list-read-only-domain-controllers": {
+      "cmdlet": "Get-BrokerReadOnlyDomainControllers",
+      "fields": {
+        "Name": "object-name",
+        "Site": "object-name",
+        "OperatingSystem": "operational",
+        "IPv4Address": "network-identifier"
+      },
+      "untrustedText": [
+        "Name",
+        "Site",
+        "OperatingSystem"
+      ]
+    },
+    "get-applocker-policy": {
+      "cmdlet": "Get-BrokerAppLockerPolicy",
+      "fields": {
+        "CollectionType": "security-config",
+        "EnforcementMode": "security-config",
+        "RuleCount": "security-config"
+      }
+    }
+  }
+}

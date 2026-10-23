@@ -9,6 +9,8 @@ using Broker.Registry;
 using Broker.Transport;
 using Microsoft.Extensions.Logging;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Broker.Tests")]
+
 namespace Broker.Host;
 
 /// <summary>
