@@ -32,10 +32,10 @@ dotnet build mcp-broker.sln -c Release -p:EnableWindowsTargeting=true
   Build succeeded. 0 Warning(s), 0 Error(s)
 
 dotnet test mcp-broker.sln -c Release -p:EnableWindowsTargeting=true
-  Passed!  - Failed: 0, Passed: 456, Skipped: 8, Total: 464
+  Passed!  - Failed: 0, Passed: 564, Skipped: 8, Total: 572
 
 python3 .github/scripts/check-skips.py <trx> --allow "Requires Windows"
-  464 tests: 456 passed, 0 failed, 8 skipped, 0 other   (exit 0)
+  572 tests: 564 passed, 0 failed, 8 skipped, 0 other   (exit 0)
 ```
 
 The 8 skipped tests are the `[WindowsOnlyFact]` tests (`SignatureVerifierRealFileTests` ×4,
@@ -50,10 +50,10 @@ wrapper files are not at their `C:\McpBroker\jea` paths on this machine); the ho
 `Startup self-check failed; refusing to open pipe listener`, opened no pipe, and exited with code 1.
 `generate-jea` produced 66 files (62 role capabilities, 4 session configurations).
 
-Mutation checks: 24 deliberate breakages of the implementation (unbounded queue, off-by-one limits,
+Mutation checks: 30 deliberate breakages of the implementation (unbounded queue, off-by-one limits,
 approver list not enforced, tool comparison removed, masking fail-open, taint re-check removed,
-watcher not subscribed to `Renamed`, wrapper gaining `Select-Object *`, and so on) were each caught by at
-least one test.
+watcher not subscribed to `Renamed`, wrapper gaining `Select-Object *`, generator skipping identifier
+validation, configuration falling back silently, and so on) were each caught by at least one test.
 
 ## 2. Corrections to earlier statements
 
@@ -91,8 +91,13 @@ least one test.
 | A15 | `RateLimiter`, `TaintTracker`, `Transport.cs` | No global rate limit (many callers could collectively exhaust the host); per-caller state never pruned; a denied call still consumed general budget; no cap on in-flight requests, stalled writes, or connections per caller; a client that stopped reading held a pipe slot forever. | Global budget, pruning, deny-consumes-nothing; per-connection in-flight cap; write timeout that tears the connection down; per-caller connection cap. | `TaintTrackerBehaviourTests`, `RateLimiterBehaviourTests`, `TransportSecurityTests`, `TransportResourceLimitTests` | C→G, M |
 | A16 | `Get-BrokerNetworkControllerConfig.psm1`, `Get-BrokerJeaEndpoints.psm1` | `Node = $nc.Node` passed an unprojected object graph (a remote call deserializes every property and the broker flattens all of it); `Get-BrokerJeaEndpoints` documented its output as "non-sensitive" while returning `RunAsUser` and `Permission`. | Node projected to names; comment corrected; fields classified. | `NetworkControllerProjectionTests`, `OutputSchemaInventoryTests` | S, M. The real Network Controller cmdlet is **X** |
 | A17 | `deploy/setup-wdac.ps1` | The policy was generated from the MCP directory alone: enforced, it would **block Windows itself**. "Enforced" regenerated a policy rather than promoting the audited one, and nothing gated the switch. A first draft of the new gate also had a `TryParse` overload bug that made it throw every time (found only because the function was executed). | Merge with a Windows base policy (refuse without one); promote the saved audit artifact; readiness gate; typed confirmation; Boot Audit on Failure; rollback notes first; never deploys. | `WdacReadinessTests` (22, executed), `DeploymentScriptStaticTests` | R→G for the gate logic. The script end to end, event queries and CiTool: **X** |
-| A19 | `Worker.cs`, `Program.cs` | A failed startup self-check stopped the host but **exited 0**, so a service manager saw a clean stop (no recovery action, no alert). | `Environment.ExitCode = 1` on a failed self-check; `Program.cs` returns it. | Checked by running the host (see section 1); no automated test | Executed manually |
 | A18 | `test/` | The suite was removed from the tree (see section 2); four restored tests passed vacuously when the fixture file was absent. | Restored; Windows-only tests are explicit skips; CI forbids unexplained skips. | `.github/scripts/check-skips.py` | Script validated locally in all three directions |
+| A19 | `Worker.cs`, `Program.cs` | A failed startup self-check stopped the host but **exited 0**, so a service manager saw a clean stop (no recovery action, no alert). | `Environment.ExitCode = 1` on a failed self-check; `Program.cs` returns it. | Checked by running the host (see section 1); no automated test | Executed manually |
+| A20 | `Policy.cs` `ParameterValidator.Validate` | A `resourceAllowlist` entry on an **optional** parameter was never checked when the caller left the parameter out, and an entry naming an undefined parameter (a typo) was silently never applied. Neither occurs in the shipped manifest (a test now asserts that), so this was latent. | Both deny. | `ParameterValidatorHardeningTests`, `ShippedManifestInvariantTests` | R→G, M |
+| A21 | `Policy.cs`, `Transport.cs` `ParseToolCall` | `unknown-parameter:<name>` echoed an attacker-chosen name (any length, any characters) into the reject reason, the logs and the audit event, and the `toolId` was logged verbatim at any length, so a newline forged log lines. | Plain identifiers only are echoed; `toolId` must match the manifest schema's shape and be at most 100 characters. | `ParameterValidatorHardeningTests`, `TransportSecurityTests` | R→G, M |
+| A22 | `Policy.cs` | Bidi overrides (U+202E), zero-width characters, byte-order marks and line/paragraph separators passed the control-character rule, so a value could read differently to a human approver than to the machine. Only parameters with permissive patterns are exposed (the write tools use ASCII-only patterns). | Rejected by Unicode category. | `ParameterValidatorHardeningTests` | R→G, M |
+| A23 | `JeaConfigGenerator.cs` | Manifest identifiers (cmdlet, parameter names, gMSA, endpoint) were interpolated **unescaped** into the `.psrc`/`.pssc` files that decide what JEA exposes; `RoleCapabilityName` was used as a file name; ranges were culture-formatted; and a file left by a removed tool would be registered by `register-jea.ps1` with the rest. The manifest is operator-authored and integrity-checked, so this needs a bad edit rather than an outside attacker. | All identifiers validated before anything is written; invariant formatting; stray generated files refused (nothing is deleted). | `JeaConfigGeneratorInputTests` | R→G (30 failures), M |
+| A24 | `Program.cs`, `Worker.cs`, `Transport.cs` | Ten settings used `TryParse(...) ? n : default`, so a typo silently changed a security bound (`RequireDistinctApprover: "yes"` became false). | `ConfigReader`: absent key = default, invalid value = startup refused (exit 1) naming the key. The pipe servers validate every setting before listening. | `ConfigurationStrictnessTests` | C→G, M. Real host executed with five invalid values |
 
 ### 3.2 Hardening (no specific vulnerability claimed)
 
@@ -138,17 +143,17 @@ connection's impersonated SID. Authorization must never rely on an identity clai
 
 ## 6. Test inventory
 
-464 tests in `test/Broker.Tests`. Counts by area (one Linux run; CI is the record):
+572 tests in `test/Broker.Tests`. Counts by area (one Linux run; CI is the record):
 
 | Area | Test classes | Tests |
 |---|---|---|
 | Approval, consent, router | `ConsentEngineTests`, `ConsentEngineToolBindingTests`, `ElicitationRouterTests`, `ElicitationRouterBindingTests`, `ApprovalPipeServeTests` | 42 |
 | Pipeline gates and fail-closed behaviour | `PipelineSecurityTests`, `BrokerPipelineTests` | 63 |
-| Parameters, types, paths | `ParameterValidatorTests`, `TypedParameterTests`, `TaskPathValidationTests`, `UntrustedSourceGateTests` | 112 |
-| Transport and identity | `TransportIntegrationTests`, `TransportSecurityTests`, `TransportResourceLimitTests`, `PipePrincipalTests`, `McpFramingTests`, `WindowsPipeIdentityTests` (W) | 64 |
+| Parameters, types, paths | `ParameterValidatorTests`, `ParameterValidatorHardeningTests`, `TypedParameterTests`, `TaskPathValidationTests`, `UntrustedSourceGateTests` | 131 |
+| Transport, identity, configuration | `TransportIntegrationTests`, `TransportSecurityTests`, `TransportResourceLimitTests`, `PipePrincipalTests`, `McpFramingTests`, `ConfigReaderTests`, `ServerConfigurationValidationTests`, `WindowsPipeIdentityTests` (W) | 118 |
 | Limits, taint, AMSI | `BoundedJeaExecutorTests`, `JeaEndpointClientFailureTests`, `TaintTrackerBehaviourTests`, `TaintTrackerTests`, `RateLimiterBehaviourTests`, `RateLimiterTests`, `AmsiScannerTests` | 70 |
-| Manifest and registry | `ManifestStoreHardeningTests`, `ManifestStoreRevocationTests`, `ManifestIntegrityTests`, `ManifestTierHardeningTests`, `ShippedManifestInvariantTests`, `CorrelationLogTests`, `SignatureVerifierRealFileTests` (W) | 44 |
-| JEA configuration and wrappers | `JeaConfigGeneratorTests`, `JeaEndpointClientSerializationTests`, `OutputSchemaInventoryTests`, `WrapperHygieneTests`, `NetworkControllerProjectionTests` (S) | 37 |
+| Manifest and registry | `ManifestStoreHardeningTests`, `ManifestStoreRevocationTests`, `ManifestIntegrityTests`, `ManifestTierHardeningTests`, `ShippedManifestInvariantTests`, `CorrelationLogTests`, `SignatureVerifierRealFileTests` (W) | 45 |
+| JEA configuration and wrappers | `JeaConfigGeneratorTests`, `JeaConfigGeneratorInputTests`, `JeaEndpointClientSerializationTests`, `OutputSchemaInventoryTests`, `WrapperHygieneTests`, `NetworkControllerProjectionTests` (S) | 71 |
 | Deployment scripts | `WdacReadinessTests` (executed PowerShell), `DeploymentScriptStaticTests` (parse + AST) | 29 |
 | Workflows | `WorkflowTests` | 3 |
 
@@ -202,6 +207,12 @@ connection's impersonated SID. Authorization must never rely on an identity clai
   caller, 10 s write timeout). JSON `true`/`false` parameters are now accepted as `"true"`/`"false"`.
   The wrapper `Get-BrokerNetworkControllerConfig` returns node names instead of node objects. Wrappers
   must be re-signed after these edits.
+- Operators will notice: a bad setting now stops the service (exit code 1, key named) where it used to fall
+  back to a default, so review `appsettings.json` and any environment overrides before upgrading; a failed
+  startup self-check exits 1 instead of 0; `generate-jea` refuses a manifest with a non-identifier value, an
+  output directory holding generated files that are not in the manifest, or `useGmsa` without a
+  `gmsaAccount`; a tool id that is not `^[a-z0-9]+(-[a-z0-9]+)*$` is a malformed request; a
+  `resourceAllowlist` entry on an optional or undefined parameter denies the call.
 - Operators: regenerate the manifest sidecar after any manifest edit; set `Amsi:Mode` deliberately; review
   the new `Jea:Limits:*` and `Pipe:*` defaults for the expected load.
 

@@ -215,6 +215,17 @@ stops the service rather than silently falling back to a default.
   numbers keep their exact text (so an integer parameter rejects `1.5`), and objects, arrays, `null` and
   duplicate names are rejected as malformed.
 - The approver is shown the validated parameters, not just a hash.
+- **A tool id** must be a plain identifier (`^[a-z0-9]+(-[a-z0-9]+)*$`, at most 100 characters).
+  An unknown parameter name is echoed in a reject reason only if it is a plain identifier.
+- **A `resourceAllowlist` entry applies to a required parameter.** A scope on an optional parameter, or on a
+  parameter the tool does not define, denies the call rather than being skipped.
+- **`generate-jea` is strict about its input and its output directory.** Cmdlet, module, endpoint, gMSA,
+  role-capability and parameter names must be plain identifiers (they are written into PowerShell data
+  files that decide what JEA exposes); it refuses to run if the output directory already holds
+  `.psrc`/`.pssc` files that are not part of this manifest (`register-jea.ps1` would register them too),
+  and it never deletes anything.
+- **A bad setting stops startup.** The service refuses to start (exit code 1, naming the key) rather than
+  falling back to a default; a failed startup self-check also exits non-zero.
 
 ## Hardening status
 
@@ -285,7 +296,7 @@ this paragraph.
 | `[WindowsOnlyFact]` tests | WinVerifyTrust against a real signed file, real named-pipe ACL and impersonation identity, real AMSI | A Windows host. Reported as **skipped**, never passed, elsewhere |
 | Not in this repository | AD/gMSA/Kerberos, a registered JEA endpoint reached over WSMan, any real Windows Server role, WDAC enforcement, a second principal being refused by a pipe ACL | A domain-joined test environment (see `docs/security-hardening.md`) |
 
-Last local run: 464 tests, 456 passed, 0 failed, 8 skipped (all Windows-only). The Windows-only tests
+Last local run: 572 tests, 564 passed, 0 failed, 8 skipped (all Windows-only). The Windows-only tests
 have not been executed by the author of this revision; the CI Windows job (`.github/workflows/ci.yml`)
 is where they run, and it fails if any test is skipped.
 

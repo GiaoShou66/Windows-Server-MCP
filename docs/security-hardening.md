@@ -32,7 +32,9 @@
 - Install each module once in a canonical, ACL-protected module directory. Remove
   shadowed duplicate module versions.
 - Generate JEA files from the reviewed manifest, review the diff, and register only the
-  generated files from the same deployment. Do not deploy the files tracked under `jea/generated`; they are
+  generated files from the same deployment. `generate-jea` validates every identifier it writes into the
+  files, and refuses to run into a directory that holds generated files not in the manifest (because
+  `register-jea.ps1` registers everything in the directory); use a clean directory per release. Do not deploy the files tracked under `jea/generated`; they are
   stale snapshots.
 - Treat manifest, policy, wrapper modules, role capabilities, and session configurations
   as one versioned release.
