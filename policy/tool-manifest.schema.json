@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mcp-broker/schemas/tool-manifest.schema.json",
+  "title": "MCP Broker Tool Manifest",
+  "type": "object",
+  "definitions": {
+    "tool": {
+      "type": "object",
+      "required": ["toolId", "displayName", "server", "riskTier", "jeaMapping", "parameters"],
+      "additionalProperties": false,
+      "properties": {
+        "toolId": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "unique stable ID, e.g. 'list-jea-endpoints'"
+        },
+        "displayName": { "type": "string" },
+        "description": { "type": "string" },
+        "revoked": {
+          "type": "boolean",
+          "default": false,
+          "description": "fast kill switch; hot-reloaded without a service restart"
+        },
+        "server": {
+          "type": "object",
+          "required": ["serverId", "signatureThumbprint", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "serverId": { "type": "string" },
+            "path": { "type": "string" },
+            "signatureThumbprint": {
+              "type": "string",
+              "pattern": "^[0-9A-Fa-f]{40}$",
+              "description": "Authenticode cert thumbprint, SHA-1, 40 hex chars"
+            },
+            "provenance": {
+              "type": "string",
+              "enum": ["internal-signed", "vendor-signed", "unverified"]
+            }
+          }
+        },
+        "riskTier": {
+          "type": "string",
+          "enum": ["read", "write", "destructive"],
+          "description": "read = default-allow; write/destructive = requires elicitation"
+        },
+        "requiresElicitation": {
+          "type": "boolean",
+          "description": "explicit override; defaults true for write/destructive, false for read"
+        },
+        "jeaMapping": {
+          "type": "object",
+          "required": ["endpointName", "roleCapabilityName", "cmdlet", "moduleName", "accessGroup"],
+          "additionalProperties": false,
+          "properties": {
+            "endpointName": { "type": "string" },
+            "roleCapabilityName": { "type": "string" },
+            "cmdlet": { "type": "string" },
+            "moduleName": {
+              "type": "string",
+              "description": "PowerShell module that exports the cmdlet; emitted into the .psrc ModulesToImport"
+            },
+            "accessGroup": {
+              "type": "string",
+              "description": "real security principal (group/account) used as the .pssc RoleDefinitions key, e.g. 'CONTOSO\\McpBrokerCallers'"
+            },
+            "useGmsa": {
+              "type": "boolean",
+              "description": "true: session runs as the gMSA (network/AD tools); false: virtual account (local-only)"
+            },
+            "gmsaAccount": {
+              "type": "string",
+              "description": "gMSA name when useGmsa is true, e.g. 'McpBrokerSvc$'"
+            },
+            "virtualAccountGroups": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "local groups to add the virtual account to, e.g. ['Administrators'] when local privilege is needed"
+            },
+            "externalCommands": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "external executables the cmdlet invokes internally (e.g. 'secedit.exe'), emitted into the .psrc VisibleExternalCommands so the JEA session permits them"
+            }
+          }
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "allowlist"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string", "enum": ["string", "int", "bool", "enum"] },
+              "required": { "type": "boolean", "default": false },
+              "allowlist": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": false,
+                "description": "at least one constraint mode must be set; no freeform escape hatch",
+                "properties": {
+                  "enumValues": { "type": "array", "items": { "type": "string" } },
+                  "regexPattern": { "type": "string" },
+                  "maxLength": { "type": "integer", "minimum": 1 },
+                  "range": {
+                    "type": "object",
+                    "required": ["min", "max"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": { "type": "number" },
+                      "max": { "type": "number" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "untrustedInputSources": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["ad-attribute", "file-content", "network-response"] },
+          "description": "data categories this tool's output may contain; forces downstream untrusted tagging"
+        },
+        "maskedFields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "output field names to mask before returning to LLM context"
+        }
+      }
+    }
+  },
+  "required": ["tools"],
+  "properties": {
+    "tools": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/tool" }
+    }
+  }
+}

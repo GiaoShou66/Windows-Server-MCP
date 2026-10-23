@@ -1,0 +1,701 @@
+{
+  "tools": [
+    {
+      "toolId": "list-jea-endpoints",
+      "displayName": "List JEA Endpoints",
+      "description": "Enumerates registered PSSessionConfiguration endpoints on this host.",
+      "server": {
+        "serverId": "mcp-broker-builtin",
+        "path": "C:\\McpBroker\\jea\\Get-BrokerJeaEndpoints.psm1",
+        "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "provenance": "internal-signed"
+      },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": {
+        "endpointName": "McpBroker.ReadLocal",
+        "roleCapabilityName": "ListJeaEndpoints",
+        "cmdlet": "Get-BrokerJeaEndpoints",
+        "moduleName": "Get-BrokerJeaEndpoints",
+        "accessGroup": "CONTOSO\\McpBrokerCallers",
+        "useGmsa": false
+      },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "query-ad-user",
+      "displayName": "Query AD User",
+      "description": "Returns a limited AD user profile by sAMAccountName.",
+      "server": {
+        "serverId": "mcp-broker-builtin",
+        "path": "C:\\McpBroker\\jea\\Get-BrokerAdUser.psm1",
+        "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "provenance": "internal-signed"
+      },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": {
+        "endpointName": "McpBroker.ReadDirectory",
+        "roleCapabilityName": "QueryAdUser",
+        "cmdlet": "Get-BrokerAdUser",
+        "moduleName": "Get-BrokerAdUser",
+        "accessGroup": "CONTOSO\\McpBrokerCallers",
+        "useGmsa": true,
+        "gmsaAccount": "McpBrokerSvc$"
+      },
+      "parameters": [
+        {
+          "name": "SamAccountName",
+          "type": "string",
+          "required": true,
+          "allowlist": { "regexPattern": "^[a-zA-Z0-9._-]{1,64}$" }
+        }
+      ],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": ["objectSid", "distinguishedName"]
+    },
+    {
+      "toolId": "summarize-transcript-logs",
+      "displayName": "Summarize JEA Transcript Logs",
+      "description": "Returns counts of tool invocations per caller/day from JEA transcripts over a bounded window.",
+      "server": {
+        "serverId": "mcp-broker-builtin",
+        "path": "C:\\McpBroker\\jea\\Get-BrokerTranscriptSummary.psm1",
+        "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "provenance": "internal-signed"
+      },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": {
+        "endpointName": "McpBroker.ReadLocal",
+        "roleCapabilityName": "SummarizeTranscripts",
+        "cmdlet": "Get-BrokerTranscriptSummary",
+        "moduleName": "Get-BrokerTranscriptSummary",
+        "accessGroup": "CONTOSO\\McpBrokerCallers",
+        "useGmsa": false
+      },
+      "parameters": [
+        {
+          "name": "DaysBack",
+          "type": "int",
+          "required": false,
+          "allowlist": { "range": { "min": 1, "max": 30 } }
+        }
+      ],
+      "untrustedInputSources": ["file-content"],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-windows-features",
+      "displayName": "List Windows Server Features",
+      "description": "Enumerates installed/available Windows Server roles and features (Server Manager).",
+      "server": {
+        "serverId": "mcp-broker-builtin",
+        "path": "C:\\McpBroker\\jea\\Get-BrokerWindowsFeatures.psm1",
+        "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "provenance": "internal-signed"
+      },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": {
+        "endpointName": "McpBroker.ReadLocal",
+        "roleCapabilityName": "ListWindowsFeatures",
+        "cmdlet": "Get-BrokerWindowsFeatures",
+        "moduleName": "Get-BrokerWindowsFeatures",
+        "accessGroup": "CONTOSO\\McpBrokerCallers",
+        "useGmsa": false
+      },
+      "parameters": [
+        {
+          "name": "InstalledOnly",
+          "type": "bool",
+          "required": false,
+          "allowlist": { "enumValues": ["true", "false"] }
+        }
+      ],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-group-policies",
+      "displayName": "List Group Policy Objects",
+      "description": "Enumerates GPOs in the domain (name, status, link state) via the GroupPolicy module.",
+      "server": {
+        "serverId": "mcp-broker-builtin",
+        "path": "C:\\McpBroker\\jea\\Get-BrokerGroupPolicies.psm1",
+        "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "provenance": "internal-signed"
+      },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": {
+        "endpointName": "McpBroker.ReadDirectory",
+        "roleCapabilityName": "ListGroupPolicies",
+        "cmdlet": "Get-BrokerGroupPolicies",
+        "moduleName": "Get-BrokerGroupPolicies",
+        "accessGroup": "CONTOSO\\McpBrokerCallers",
+        "useGmsa": true,
+        "gmsaAccount": "McpBrokerSvc$"
+      },
+      "parameters": [],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-iis-sites",
+      "displayName": "List IIS Sites",
+      "description": "Enumerates IIS sites on this host (name, state, bindings, physical path) via WebAdministration.",
+      "server": {
+        "serverId": "mcp-broker-builtin",
+        "path": "C:\\McpBroker\\jea\\Get-BrokerIisSites.psm1",
+        "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "provenance": "internal-signed"
+      },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": {
+        "endpointName": "McpBroker.ReadLocal",
+        "roleCapabilityName": "ListIisSites",
+        "cmdlet": "Get-BrokerIisSites",
+        "moduleName": "Get-BrokerIisSites",
+        "accessGroup": "CONTOSO\\McpBrokerCallers",
+        "useGmsa": false
+      },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-ad-computers",
+      "displayName": "List AD Computers",
+      "description": "Enumerates computer accounts in the domain (AD DS).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerAdComputers.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadDirectory", "roleCapabilityName": "ListAdComputers", "cmdlet": "Get-BrokerAdComputers", "moduleName": "Get-BrokerAdComputers", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": ["objectSid"]
+    },
+    {
+      "toolId": "list-ad-groups",
+      "displayName": "List AD Groups",
+      "description": "Enumerates security/distribution groups in the domain (AD DS).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerAdGroups.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadDirectory", "roleCapabilityName": "ListAdGroups", "cmdlet": "Get-BrokerAdGroups", "moduleName": "Get-BrokerAdGroups", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": ["objectSid"]
+    },
+    {
+      "toolId": "list-certificate-authorities",
+      "displayName": "List Certificate Authorities",
+      "description": "Enumerates enterprise CAs published in AD (AD CS).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerCertificateAuthorities.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListCertificateAuthorities", "cmdlet": "Get-BrokerCertificateAuthorities", "moduleName": "Get-BrokerCertificateAuthorities", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-adfs-relying-parties",
+      "displayName": "List AD FS Relying Party Trusts",
+      "description": "Enumerates relying party trusts configured on this AD FS server.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerAdfsRelyingParties.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListAdfsRelyingParties", "cmdlet": "Get-BrokerAdfsRelyingParties", "moduleName": "Get-BrokerAdfsRelyingParties", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-dhcp-scopes",
+      "displayName": "List DHCP Scopes",
+      "description": "Enumerates IPv4 scopes on this DHCP server.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerDhcpScopes.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListDhcpScopes", "cmdlet": "Get-BrokerDhcpScopes", "moduleName": "Get-BrokerDhcpScopes", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-dns-zones",
+      "displayName": "List DNS Zones",
+      "description": "Enumerates zones hosted on this DNS server.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerDnsZones.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListDnsZones", "cmdlet": "Get-BrokerDnsZones", "moduleName": "Get-BrokerDnsZones", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-smb-shares",
+      "displayName": "List SMB Shares",
+      "description": "Enumerates SMB file shares on this host (File and Storage Services).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerSmbShares.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListSmbShares", "cmdlet": "Get-BrokerSmbShares", "moduleName": "Get-BrokerSmbShares", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-disks",
+      "displayName": "List Disks",
+      "description": "Enumerates physical disks and partitions on this host (Storage).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerDisks.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListDisks", "cmdlet": "Get-BrokerDisks", "moduleName": "Get-BrokerDisks", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-storage-pools",
+      "displayName": "List Storage Pools",
+      "description": "Enumerates Storage Spaces pools on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerStoragePools.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListStoragePools", "cmdlet": "Get-BrokerStoragePools", "moduleName": "Get-BrokerStoragePools", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-hyperv-vms",
+      "displayName": "List Hyper-V VMs",
+      "description": "Enumerates virtual machines on this Hyper-V host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerHyperVVms.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListHyperVVms", "cmdlet": "Get-BrokerHyperVVms", "moduleName": "Get-BrokerHyperVVms", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-printers",
+      "displayName": "List Printers",
+      "description": "Enumerates shared printers on this print server (Print and Document Services).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerPrinters.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListPrinters", "cmdlet": "Get-BrokerPrinters", "moduleName": "Get-BrokerPrinters", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-rds-collections",
+      "displayName": "List RDS Session Collections",
+      "description": "Enumerates RemoteApp/session collections on this RD Connection Broker.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerRdsCollections.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListRdsCollections", "cmdlet": "Get-BrokerRdsCollections", "moduleName": "Get-BrokerRdsCollections", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-wsus-updates",
+      "displayName": "List WSUS Pending Updates",
+      "description": "Enumerates updates awaiting approval on this WSUS server.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerWsusUpdates.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListWsusUpdates", "cmdlet": "Get-BrokerWsusUpdates", "moduleName": "Get-BrokerWsusUpdates", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-wds-boot-images",
+      "displayName": "List WDS Boot Images",
+      "description": "Enumerates boot images on this Windows Deployment Services server.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerWdsBootImages.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListWdsBootImages", "cmdlet": "Get-BrokerWdsBootImages", "moduleName": "Get-BrokerWdsBootImages", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-cluster-nodes",
+      "displayName": "List Failover Cluster Nodes",
+      "description": "Enumerates nodes in the local failover cluster.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerClusterNodes.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListClusterNodes", "cmdlet": "Get-BrokerClusterNodes", "moduleName": "Get-BrokerClusterNodes", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-bitlocker-volumes",
+      "displayName": "List BitLocker Volumes",
+      "description": "Enumerates volumes and their BitLocker protection status on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerBitlockerVolumes.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListBitlockerVolumes", "cmdlet": "Get-BrokerBitlockerVolumes", "moduleName": "Get-BrokerBitlockerVolumes", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": ["KeyProtectorId", "RecoveryPassword"]
+    },
+    {
+      "toolId": "list-firewall-rules",
+      "displayName": "List Firewall Rules",
+      "description": "Enumerates enabled Windows Firewall rules on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerFirewallRules.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListFirewallRules", "cmdlet": "Get-BrokerFirewallRules", "moduleName": "Get-BrokerFirewallRules", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-nlb-clusters",
+      "displayName": "List NLB Clusters",
+      "description": "Enumerates Network Load Balancing clusters configured on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerNlbClusters.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListNlbClusters", "cmdlet": "Get-BrokerNlbClusters", "moduleName": "Get-BrokerNlbClusters", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-network-adapters",
+      "displayName": "List Network Adapters",
+      "description": "Enumerates network adapters and their IP configuration on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerNetworkAdapters.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListNetworkAdapters", "cmdlet": "Get-BrokerNetworkAdapters", "moduleName": "Get-BrokerNetworkAdapters", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-windows-services",
+      "displayName": "List Windows Services",
+      "description": "Enumerates services and their run state on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerWindowsServices.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListWindowsServices", "cmdlet": "Get-BrokerWindowsServices", "moduleName": "Get-BrokerWindowsServices", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-local-users",
+      "displayName": "List Local Users",
+      "description": "Enumerates local (non-domain) user accounts on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerLocalUsers.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListLocalUsers", "cmdlet": "Get-BrokerLocalUsers", "moduleName": "Get-BrokerLocalUsers", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": ["SID"]
+    },
+    {
+      "toolId": "list-scheduled-tasks",
+      "displayName": "List Scheduled Tasks",
+      "description": "Enumerates scheduled tasks and their state on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerScheduledTasks.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListScheduledTasks", "cmdlet": "Get-BrokerScheduledTasks", "moduleName": "Get-BrokerScheduledTasks", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-adlds-instances",
+      "displayName": "List AD LDS Instances",
+      "description": "Enumerates AD Lightweight Directory Services instances on this host (via their ADAM_* service registrations; AD LDS ships no dedicated enumeration cmdlet).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerAdldsInstances.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListAdldsInstances", "cmdlet": "Get-BrokerAdldsInstances", "moduleName": "Get-BrokerAdldsInstances", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-rms-superusers",
+      "displayName": "List AD RMS Super Users",
+      "description": "Enumerates the AD RMS super user group members on this cluster.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerRmsSuperUsers.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListRmsSuperUsers", "cmdlet": "Get-BrokerRmsSuperUsers", "moduleName": "Get-BrokerRmsSuperUsers", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-hgs-status",
+      "displayName": "Get Host Guardian Service Status",
+      "description": "Returns the operation mode and configuration status of this Host Guardian Service.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerHgsStatus.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetHgsStatus", "cmdlet": "Get-BrokerHgsStatus", "moduleName": "Get-BrokerHgsStatus", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-network-controller-config",
+      "displayName": "Get Network Controller Configuration",
+      "description": "Returns this Network Controller's REST endpoint and node configuration.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerNetworkControllerConfig.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetNetworkControllerConfig", "cmdlet": "Get-BrokerNetworkControllerConfig", "moduleName": "Get-BrokerNetworkControllerConfig", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-remote-access-status",
+      "displayName": "Get Remote Access (RRAS/NPAS) Status",
+      "description": "Returns VPN/DirectAccess role status on this Remote Access server (covers the RRAS portion of Network Policy and Access Services).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerRemoteAccessStatus.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetRemoteAccessStatus", "cmdlet": "Get-BrokerRemoteAccessStatus", "moduleName": "Get-BrokerRemoteAccessStatus", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-storage-migration-jobs",
+      "displayName": "List Storage Migration Jobs",
+      "description": "Enumerates Storage Migration Service jobs configured on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerStorageMigrationJobs.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListStorageMigrationJobs", "cmdlet": "Get-BrokerStorageMigrationJobs", "moduleName": "Get-BrokerStorageMigrationJobs", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-system-insights-capabilities",
+      "displayName": "List System Insights Capabilities",
+      "description": "Enumerates predictive analysis capabilities registered with System Insights on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerSystemInsightsCapabilities.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListSystemInsightsCapabilities", "cmdlet": "Get-BrokerSystemInsightsCapabilities", "moduleName": "Get-BrokerSystemInsightsCapabilities", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-domain-password-policy",
+      "displayName": "Get Domain Password Policy",
+      "description": "Returns the default domain password and account lockout policy (AD DS).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerDomainPasswordPolicy.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadDirectory", "roleCapabilityName": "GetDomainPasswordPolicy", "cmdlet": "Get-BrokerDomainPasswordPolicy", "moduleName": "Get-BrokerDomainPasswordPolicy", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-fine-grained-password-policies",
+      "displayName": "List Fine-Grained Password Policies",
+      "description": "Enumerates AD fine-grained password policies (PSOs) and their target precedence.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerFineGrainedPasswordPolicies.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadDirectory", "roleCapabilityName": "ListFineGrainedPasswordPolicies", "cmdlet": "Get-BrokerFineGrainedPasswordPolicies", "moduleName": "Get-BrokerFineGrainedPasswordPolicies", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-local-security-policy",
+      "displayName": "Get Local Security Policy",
+      "description": "Returns local password and account lockout policy settings (secedit SECURITYPOLICY export).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerLocalSecurityPolicy.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetLocalSecurityPolicy", "cmdlet": "Get-BrokerLocalSecurityPolicy", "moduleName": "Get-BrokerLocalSecurityPolicy", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false, "externalCommands": ["secedit.exe"] },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-audit-policy",
+      "displayName": "Get Audit Policy",
+      "description": "Returns the effective audit policy subcategory settings on this host (auditpol).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerAuditPolicy.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetAuditPolicy", "cmdlet": "Get-BrokerAuditPolicy", "moduleName": "Get-BrokerAuditPolicy", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false, "externalCommands": ["auditpol.exe"] },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-user-rights-assignments",
+      "displayName": "List User Rights Assignments",
+      "description": "Enumerates local security policy user rights assignments (secedit USER_RIGHTS export).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerUserRightsAssignments.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListUserRightsAssignments", "cmdlet": "Get-BrokerUserRightsAssignments", "moduleName": "Get-BrokerUserRightsAssignments", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false, "externalCommands": ["secedit.exe"] },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-local-groups",
+      "displayName": "List Local Groups",
+      "description": "Enumerates local (non-domain) groups on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerLocalGroups.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListLocalGroups", "cmdlet": "Get-BrokerLocalGroups", "moduleName": "Get-BrokerLocalGroups", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": ["SID"]
+    },
+    {
+      "toolId": "list-local-group-members",
+      "displayName": "List Local Group Members",
+      "description": "Enumerates members of a built-in local group (Administrators, Remote Desktop Users, etc.).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerLocalGroupMembers.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListLocalGroupMembers", "cmdlet": "Get-BrokerLocalGroupMembers", "moduleName": "Get-BrokerLocalGroupMembers", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        {
+          "name": "GroupName",
+          "type": "string",
+          "required": true,
+          "allowlist": { "enumValues": ["Administrators", "Users", "Remote Desktop Users", "Backup Operators", "Power Users", "Guests"] }
+        }
+      ],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-ad-organizational-units",
+      "displayName": "List AD Organizational Units",
+      "description": "Enumerates organizational units in the domain (the containers GPOs link to).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerAdOrganizationalUnits.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadDirectory", "roleCapabilityName": "ListAdOrganizationalUnits", "cmdlet": "Get-BrokerAdOrganizationalUnits", "moduleName": "Get-BrokerAdOrganizationalUnits", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-directory-contents",
+      "displayName": "List Directory Contents",
+      "description": "Lists files and folders under a given absolute path (File Services file manager). Metadata only — no file content is ever read.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerListDirectory.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListDirectoryContents", "cmdlet": "Get-BrokerListDirectory", "moduleName": "Get-BrokerListDirectory", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        {
+          "name": "Path",
+          "type": "string",
+          "required": true,
+          "allowlist": { "regexPattern": "^(?!.*\\.\\.)[A-Za-z]:\\\\.*$", "maxLength": 260 }
+        }
+      ],
+      "untrustedInputSources": ["file-content"],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-ftp-sites",
+      "displayName": "List FTP Sites",
+      "description": "Enumerates FTP sites on this host (IIS 10.0 FTP Server role).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerFtpSites.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "ListFtpSites", "cmdlet": "Get-BrokerFtpSites", "moduleName": "Get-BrokerFtpSites", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-execution-policy",
+      "displayName": "Get PowerShell Execution Policy",
+      "description": "Returns the PowerShell execution policy at every scope (MachinePolicy, UserPolicy, Process, CurrentUser, LocalMachine).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerExecutionPolicy.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetExecutionPolicy", "cmdlet": "Get-BrokerExecutionPolicy", "moduleName": "Get-BrokerExecutionPolicy", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-psremoting-status",
+      "displayName": "Get PS Remoting (WinRM) Status",
+      "description": "Returns WinRM service state and configured listeners (transport/address/port) for PowerShell Remoting on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerPsRemotingStatus.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetPsRemotingStatus", "cmdlet": "Get-BrokerPsRemotingStatus", "moduleName": "Get-BrokerPsRemotingStatus", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "list-read-only-domain-controllers",
+      "displayName": "List Read-Only Domain Controllers",
+      "description": "Enumerates RODCs in the domain (AD DS).",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerReadOnlyDomainControllers.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadDirectory", "roleCapabilityName": "ListReadOnlyDomainControllers", "cmdlet": "Get-BrokerReadOnlyDomainControllers", "moduleName": "Get-BrokerReadOnlyDomainControllers", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": true, "gmsaAccount": "McpBrokerSvc$" },
+      "parameters": [],
+      "untrustedInputSources": ["ad-attribute"],
+      "maskedFields": []
+    },
+    {
+      "toolId": "get-applocker-policy",
+      "displayName": "Get AppLocker Policy",
+      "description": "Returns the effective AppLocker rule collections and enforcement mode on this host.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Get-BrokerAppLockerPolicy.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "read",
+      "requiresElicitation": false,
+      "jeaMapping": { "endpointName": "McpBroker.ReadLocal", "roleCapabilityName": "GetAppLockerPolicy", "cmdlet": "Get-BrokerAppLockerPolicy", "moduleName": "Get-BrokerAppLockerPolicy", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [],
+      "untrustedInputSources": [],
+      "maskedFields": []
+    }
+  ]
+}
