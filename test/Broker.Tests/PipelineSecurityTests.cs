@@ -243,6 +243,24 @@ public sealed class PipelineSecurityTests : IDisposable
     }
 
     [Fact]
+    public async Task ApprovalRequestCarriesTheParametersSoAHumanCanActuallyReviewThem()
+    {
+        ElicitationContext? seen = null;
+        var channel = new ElicitationChannel((c, _) =>
+        {
+            seen = c;
+            return Task.FromResult(new ElicitationReply(c.CorrelationId, c.ParamHash, true, Approver, c.ToolId));
+        });
+
+        await Run(Build(), Call("write-svc", ("Name", "Spooler")), channel);
+
+        Assert.NotNull(seen!.Parameters);
+        Assert.Equal("Spooler", seen.Parameters!["Name"]);
+        // The shown parameters are exactly the ones that were hashed and will be executed.
+        Assert.Equal(seen.ParamHash, ConsentEngine.HashOperation(seen.ToolId, seen.CallerSid, seen.Parameters));
+    }
+
+    [Fact]
     public async Task ApprovalNamingAnotherToolIsRejected()
     {
         var channel = new ElicitationChannel((c, _) =>

@@ -399,6 +399,53 @@ public class ApprovalPipeServeTests
     }
 
     [Fact]
+    public async Task TheApproverIsShownTheExactToolCallerAndParametersBeingApproved()
+    {
+        var (server, router) = Build(ApproverSid);
+        var (serverSide, client) = ChannelStream.CreatePair();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var serve = server.ServeApproverAsync(serverSide, () => true, ApproverSid, cts.Token);
+
+        var parameters = new Dictionary<string, string> { ["ServiceName"] = "Spooler", ["Action"] = "Stop" };
+        _ = router.RequestAsync(new ElicitationContext("c9", "set-windows-service-state", "S-1-5-21-CALLER", "h9", parameters),
+            TimeSpan.FromSeconds(5), cts.Token);
+
+        var frame = await McpFraming.ReadFrameAsync(client, TimeSpan.FromSeconds(5), cts.Token);
+        var root = System.Text.Json.JsonDocument.Parse(frame!).RootElement;
+
+        Assert.Equal("approval/request", root.GetProperty("type").GetString());
+        Assert.Equal("set-windows-service-state", root.GetProperty("toolId").GetString());
+        Assert.Equal("S-1-5-21-CALLER", root.GetProperty("callerSid").GetString());
+        Assert.Equal("h9", root.GetProperty("paramHash").GetString());
+        var shown = root.GetProperty("parameters").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString());
+        Assert.Equal(parameters, shown);
+
+        cts.Cancel();
+        await Task.WhenAny(serve, Task.Delay(1000));
+    }
+
+    [Fact]
+    public async Task ABacklogEntryIsShownWithItsParametersToo()
+    {
+        var (server, router) = Build(ApproverSid);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        // Requested BEFORE any approver is connected.
+        _ = router.RequestAsync(new ElicitationContext("c10", "tool-a", "CALLER", "h10",
+            new Dictionary<string, string> { ["Name"] = "x" }), TimeSpan.FromSeconds(10), cts.Token);
+
+        var (serverSide, client) = ChannelStream.CreatePair();
+        var serve = server.ServeApproverAsync(serverSide, () => true, ApproverSid, cts.Token);
+
+        var frame = await McpFraming.ReadFrameAsync(client, TimeSpan.FromSeconds(5), cts.Token);
+        var root = System.Text.Json.JsonDocument.Parse(frame!).RootElement;
+        Assert.Equal("x", root.GetProperty("parameters").GetProperty("Name").GetString());
+
+        cts.Cancel();
+        await Task.WhenAny(serve, Task.Delay(1000));
+    }
+
+    [Fact]
     public async Task AReplyFromAConnectionOutsideTheApproverListIsIgnored()
     {
         var (server, router) = Build(ApproverSid);

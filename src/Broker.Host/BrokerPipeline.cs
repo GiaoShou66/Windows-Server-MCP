@@ -222,7 +222,7 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         try
         {
             reply = await elicitation.RequestAsync(
-                new ElicitationContext(context.CorrelationId, tool.ToolId, context.CallerSid, paramHash),
+                new ElicitationContext(context.CorrelationId, tool.ToolId, context.CallerSid, paramHash, request.Parameters),
                 revokeCts.Token);
         }
         catch (OperationCanceledException)

@@ -159,6 +159,25 @@ public sealed class ManifestStoreHardeningTests : IDisposable
     }
 
     [Fact]
+    public async Task ARevocationDeliveredByAtomicRenameIsStillApplied()
+    {
+        Write(ToolJson("keep"), ToolJson("gone"));
+        using var store = Open();
+        var revoked = new TaskCompletionSource<IReadOnlyCollection<string>>();
+        store.ToolsRevoked += ids => revoked.TrySetResult(ids);
+
+        // The usual safe way to publish a file: write a temp file, then rename it over the target.
+        var temp = Path.Combine(_dir, "manifest.json.tmp");
+        File.WriteAllText(temp, JsonSerializer.Serialize(new { tools = new[] { ToolJson("keep") } }));
+        File.Move(temp, ManifestPath, overwrite: true);
+
+        var ids = await revoked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Contains("gone", ids);
+        Assert.Null(store.Get("gone"));
+        Assert.NotNull(store.Get("keep"));
+    }
+
+    [Fact]
     public void RevokedToolIsInvisibleToGet()
     {
         Write(ToolJson("a", revoked: true));

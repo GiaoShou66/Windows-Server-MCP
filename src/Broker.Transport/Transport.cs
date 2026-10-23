@@ -23,7 +23,9 @@ public interface IToolCallDispatcher
 }
 
 /// <summary>Everything the broker must show a human (or an approver) to decide one call.</summary>
-public sealed record ElicitationContext(string CorrelationId, string ToolId, string CallerSid, string ParamHash);
+public sealed record ElicitationContext(
+    string CorrelationId, string ToolId, string CallerSid, string ParamHash,
+    IReadOnlyDictionary<string, string>? Parameters = null);
 
 /// <summary>
 /// Requests a human decision for one call and awaits it. The delegate is supplied by the
@@ -44,7 +46,8 @@ public sealed record ElicitationReply(
 
 public sealed record PendingElicitation(
     string CorrelationId, string ToolId, string CallerSid, string ParamHash,
-    DateTimeOffset ExpiresUtc, TaskCompletionSource<ElicitationReply> Tcs);
+    DateTimeOffset ExpiresUtc, TaskCompletionSource<ElicitationReply> Tcs,
+    IReadOnlyDictionary<string, string>? Parameters = null);
 
 /// <summary>
 /// Shared registry that decouples the caller's pipe from the approver's pipe. A dispatch
@@ -68,7 +71,7 @@ public sealed class ElicitationRouter
         var tcs = new TaskCompletionSource<ElicitationReply>(TaskCreationOptions.RunContinuationsAsynchronously);
         var pe = new PendingElicitation(
             ctx.CorrelationId, ctx.ToolId, ctx.CallerSid, ctx.ParamHash,
-            DateTimeOffset.UtcNow.Add(ttl), tcs);
+            DateTimeOffset.UtcNow.Add(ttl), tcs, ctx.Parameters);
         lock (_pendingLock)
             _pending[ctx.CorrelationId] = pe;
 
@@ -433,7 +436,9 @@ public sealed class NamedPipeServer
                 {
                     type = "elicitation/request",
                     correlationId = ectx.CorrelationId,
-                    paramHash = ectx.ParamHash
+                    toolId = ectx.ToolId,
+                    paramHash = ectx.ParamHash,
+                    parameters = ectx.Parameters ?? new Dictionary<string, string>()
                 }));
 
                 using var ttl = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -791,6 +796,9 @@ public sealed class ApprovalPipeServer
                 toolId = pe.ToolId,
                 callerSid = pe.CallerSid,
                 paramHash = pe.ParamHash,
+                // What the approver is actually being asked to authorize. These are the validated
+                // parameters, the same ones that were hashed and that will be executed.
+                parameters = pe.Parameters ?? new Dictionary<string, string>(),
                 expiresUtc = pe.ExpiresUtc
             });
             await writeLock.WaitAsync(ct);

@@ -151,6 +151,10 @@ public sealed class ManifestStore : IDisposable
         _watcher = new FileSystemWatcher(dir, file) { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName };
         _watcher.Changed += (_, _) => Reload();
         _watcher.Created += (_, _) => Reload();
+        // Publishing by writing a temp file and renaming it over the manifest (the usual atomic
+        // deployment) raises Renamed, not Changed or Created; without this a revocation delivered
+        // that way would silently never take effect.
+        _watcher.Renamed += (_, _) => Reload();
         _watcher.EnableRaisingEvents = true;
     }
 
