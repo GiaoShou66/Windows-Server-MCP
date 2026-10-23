@@ -66,7 +66,13 @@ builder.Services.AddSingleton<ISignatureVerifier>(sp => sp.GetRequiredService<Si
 builder.Services.AddSingleton<ParameterValidator>();
 builder.Services.AddSingleton<UntrustedSourceGate>();
 builder.Services.AddSingleton<ArgvBuilder>();
-builder.Services.AddSingleton<AmsiScanner>();
+builder.Services.AddSingleton(sp =>
+{
+    var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    // Absent key keeps the documented default; a present-but-unrecognized value stops startup.
+    var mode = cfg["Amsi:Mode"] is { } raw ? AmsiOptions.ParseMode(raw) : AmsiMode.BestEffort;
+    return new AmsiScanner(sp.GetRequiredService<ILogger<AmsiScanner>>(), mode);
+});
 builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
@@ -89,9 +95,10 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-    int perMin = int.TryParse(cfg["RateLimit:CallsPerMinute"], out var a) ? a : 60;
-    int destPerHour = int.TryParse(cfg["RateLimit:DestructivePerHour"], out var b) ? b : 10;
-    return new RateLimiter(perMin, destPerHour);
+    return new RateLimiter(
+        IntSetting(cfg, "RateLimit:CallsPerMinute", 60),
+        IntSetting(cfg, "RateLimit:DestructivePerHour", 10),
+        IntSetting(cfg, "RateLimit:GlobalCallsPerMinute", 600));
 });
 
 // JEA: the pipeline only ever sees IJeaExecutor, bounded by global/endpoint/tool limits.
