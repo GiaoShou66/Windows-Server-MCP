@@ -56,7 +56,7 @@ builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
     var path = cfg["Manifest:Path"] ?? "policy/manifest.json";
-    bool requireIntegrity = !bool.TryParse(cfg["Manifest:RequireIntegrity"], out var configured) || configured;
+    bool requireIntegrity = ConfigReader.Bool(cfg, "Manifest:RequireIntegrity", true);
     return new ManifestStore(path, sp.GetRequiredService<ILogger<ManifestStore>>(), requireIntegrity, cfg["Manifest:IntegrityPath"]);
 });
 builder.Services.AddSingleton<SignatureVerifier>();
@@ -76,14 +76,14 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-    bool requireDistinct = bool.TryParse(cfg["Elicitation:RequireDistinctApprover"], out var r) && r;
+    bool requireDistinct = ConfigReader.Bool(cfg, "Elicitation:RequireDistinctApprover", false);
     var approvers = cfg.GetSection("Elicitation:ApproverSids").Get<string[]>() ?? Array.Empty<string>();
     return new ConsentEngine(requireDistinct, approvers);
 });
 builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-    int window = int.TryParse(cfg["Taint:WindowSeconds"], out var w) ? w : 300;
+    int window = ConfigReader.Int(cfg, "Taint:WindowSeconds", 300);
     return new TaintTracker(window);
 });
 builder.Services.AddSingleton(sp =>
@@ -96,9 +96,9 @@ builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
     return new RateLimiter(
-        IntSetting(cfg, "RateLimit:CallsPerMinute", 60),
-        IntSetting(cfg, "RateLimit:DestructivePerHour", 10),
-        IntSetting(cfg, "RateLimit:GlobalCallsPerMinute", 600));
+        ConfigReader.Int(cfg, "RateLimit:CallsPerMinute", 60),
+        ConfigReader.Int(cfg, "RateLimit:DestructivePerHour", 10, 0),
+        ConfigReader.Int(cfg, "RateLimit:GlobalCallsPerMinute", 600, 0));
 });
 
 // JEA: the pipeline only ever sees IJeaExecutor, bounded by global/endpoint/tool limits.
@@ -109,8 +109,8 @@ builder.Services.AddSingleton(sp =>
     return new JeaEndpointClient(
         sp.GetRequiredService<ILogger<JeaEndpointClient>>(),
         new JeaClientOptions(
-            IntSetting(cfg, "Jea:OpenTimeoutMs", defaults.OpenTimeoutMs),
-            IntSetting(cfg, "Jea:OperationTimeoutMs", defaults.OperationTimeoutMs)));
+            ConfigReader.Int(cfg, "Jea:OpenTimeoutMs", defaults.OpenTimeoutMs),
+            ConfigReader.Int(cfg, "Jea:OperationTimeoutMs", defaults.OperationTimeoutMs)));
 });
 builder.Services.AddSingleton<IJeaExecutor>(sp =>
 {
@@ -118,13 +118,13 @@ builder.Services.AddSingleton<IJeaExecutor>(sp =>
     var d = new JeaExecutionLimits();
     var limits = new JeaExecutionLimits
     {
-        MaxConcurrentTotal = IntSetting(cfg, "Jea:Limits:MaxConcurrentTotal", d.MaxConcurrentTotal),
-        MaxConcurrentPerEndpoint = IntSetting(cfg, "Jea:Limits:MaxConcurrentPerEndpoint", d.MaxConcurrentPerEndpoint),
-        MaxConcurrentPerTool = IntSetting(cfg, "Jea:Limits:MaxConcurrentPerTool", d.MaxConcurrentPerTool),
-        MaxQueueLength = IntSetting(cfg, "Jea:Limits:MaxQueueLength", d.MaxQueueLength),
-        QueueWaitTimeout = TimeSpan.FromSeconds(IntSetting(cfg, "Jea:Limits:QueueWaitSeconds", (int)d.QueueWaitTimeout.TotalSeconds)),
-        ExecutionTimeout = TimeSpan.FromSeconds(IntSetting(cfg, "Jea:Limits:ExecutionTimeoutSeconds", (int)d.ExecutionTimeout.TotalSeconds)),
-        MaxResponseBytes = IntSetting(cfg, "Jea:Limits:MaxResponseBytes", d.MaxResponseBytes)
+        MaxConcurrentTotal = ConfigReader.Int(cfg, "Jea:Limits:MaxConcurrentTotal", d.MaxConcurrentTotal, 1),
+        MaxConcurrentPerEndpoint = ConfigReader.Int(cfg, "Jea:Limits:MaxConcurrentPerEndpoint", d.MaxConcurrentPerEndpoint, 1),
+        MaxConcurrentPerTool = ConfigReader.Int(cfg, "Jea:Limits:MaxConcurrentPerTool", d.MaxConcurrentPerTool, 1),
+        MaxQueueLength = ConfigReader.Int(cfg, "Jea:Limits:MaxQueueLength", d.MaxQueueLength, 0),
+        QueueWaitTimeout = TimeSpan.FromSeconds(ConfigReader.Int(cfg, "Jea:Limits:QueueWaitSeconds", (int)d.QueueWaitTimeout.TotalSeconds)),
+        ExecutionTimeout = TimeSpan.FromSeconds(ConfigReader.Int(cfg, "Jea:Limits:ExecutionTimeoutSeconds", (int)d.ExecutionTimeout.TotalSeconds)),
+        MaxResponseBytes = ConfigReader.Int(cfg, "Jea:Limits:MaxResponseBytes", d.MaxResponseBytes, 1)
     };
     return new BoundedJeaExecutor(
         sp.GetRequiredService<JeaEndpointClient>(), limits, sp.GetRequiredService<ILogger<BoundedJeaExecutor>>());
@@ -146,17 +146,16 @@ builder.Services.AddSingleton<NamedPipeServer>();
 builder.Services.AddSingleton<ApprovalPipeServer>();
 builder.Services.AddHostedService<Worker>();
 
-var host = builder.Build();
-host.Run();
-return Environment.ExitCode;
-
-// Malformed numeric configuration must not silently fall back to a different bound than the
-// operator wrote: an unparsable value stops startup instead of being replaced by a default.
-static int IntSetting(IConfiguration cfg, string key, int fallback)
+try
 {
-    var raw = cfg[key];
-    if (raw is null) return fallback;
-    return int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var v)
-        ? v
-        : throw new InvalidOperationException($"Configuration value '{key}' is not a valid integer.");
+    var host = builder.Build();
+    host.Run();
 }
+catch (InvalidOperationException ex) when (ex.Message.StartsWith("Configuration value", StringComparison.Ordinal))
+{
+    // A bad setting is an operator error: say which key and exit non-zero, without a crash dump.
+    Console.Error.WriteLine($"Startup refused: {ex.Message}");
+    return 1;
+}
+
+return Environment.ExitCode;

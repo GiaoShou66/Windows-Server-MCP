@@ -135,6 +135,37 @@ public sealed class ElicitationRouter
 }
 
 /// <summary>
+/// Strict configuration reads. An absent key takes the documented default; a key that is present but
+/// not a valid value stops startup. It never silently becomes a default, because a typo that quietly
+/// changes a security bound is worse than a service that refuses to start. Messages name the key,
+/// never the value.
+/// </summary>
+public static class ConfigReader
+{
+    public static int Int(IConfiguration config, string key, int fallback, int min = 1, int max = int.MaxValue)
+    {
+        var raw = config[key];
+        if (raw is null) return fallback;
+
+        if (!int.TryParse(raw, System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out var value) ||
+            raw.StartsWith('+') || value < min || value > max)
+            throw new InvalidOperationException($"Configuration value '{key}' must be an integer between {min} and {max}.");
+
+        return value;
+    }
+
+    public static bool Bool(IConfiguration config, string key, bool fallback)
+    {
+        var raw = config[key];
+        if (raw is null) return fallback;
+        if (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase)) return false;
+        throw new InvalidOperationException($"Configuration value '{key}' must be 'true' or 'false'.");
+    }
+}
+
+/// <summary>
 /// Validation of the principals a pipe ACL may name. Pure string logic, so it is enforced and
 /// tested identically on every platform. A pipe client must be an explicitly provisioned user or
 /// group: the broad well-known principals (and the broad domain groups) are refused outright,
@@ -351,21 +382,28 @@ public sealed class NamedPipeServer
     }
 
     private string PipeName => _config["Pipe:Name"] ?? "McpBroker";
-    private int MaxInstances => int.TryParse(_config["Pipe:MaxInstances"], out var n) ? n : 8;
-    private int FrameTimeoutSeconds => int.TryParse(_config["Pipe:FrameTimeoutSeconds"], out var n) ? n : 5;
-    private int MaxInFlightPerConnection => PositiveInt("Pipe:MaxInFlightPerConnection", 16);
-    private int MaxMalformedRequests => PositiveInt("Pipe:MaxMalformedRequests", 5);
-    private int WriteTimeoutSeconds => PositiveInt("Pipe:WriteTimeoutSeconds", 10);
-    private int MaxConnectionsPerCaller => PositiveInt("Pipe:MaxConnectionsPerCaller", Math.Max(1, MaxInstances / 2));
-    private int ElicitationTtlSeconds => int.TryParse(_config["Elicitation:TtlSeconds"], out var n) ? n : 120;
-    private bool RequireDistinctApprover =>
-        bool.TryParse(_config["Elicitation:RequireDistinctApprover"], out var b) && b;
+    private int MaxInstances => ConfigReader.Int(_config, "Pipe:MaxInstances", 8, 1, 254);
+    private int FrameTimeoutSeconds => ConfigReader.Int(_config, "Pipe:FrameTimeoutSeconds", 5);
+    private int MaxInFlightPerConnection => ConfigReader.Int(_config, "Pipe:MaxInFlightPerConnection", 16);
+    private int MaxMalformedRequests => ConfigReader.Int(_config, "Pipe:MaxMalformedRequests", 5);
+    private int WriteTimeoutSeconds => ConfigReader.Int(_config, "Pipe:WriteTimeoutSeconds", 10);
+    private int MaxConnectionsPerCaller => ConfigReader.Int(_config, "Pipe:MaxConnectionsPerCaller", Math.Max(1, MaxInstances / 2));
+    private int ElicitationTtlSeconds => ConfigReader.Int(_config, "Elicitation:TtlSeconds", 120);
+    private bool RequireDistinctApprover => ConfigReader.Bool(_config, "Elicitation:RequireDistinctApprover", false);
 
-    private int PositiveInt(string key, int fallback) =>
-        int.TryParse(_config[key], out var n) && n > 0 ? n : fallback;
+    /// <summary>
+    /// Reads every setting once. Called before the pipe opens so an invalid value stops startup
+    /// instead of surfacing on the first connection, or being replaced by a default.
+    /// </summary>
+    internal void ValidateConfiguration()
+    {
+        _ = (MaxInstances, FrameTimeoutSeconds, MaxInFlightPerConnection, MaxMalformedRequests,
+             WriteTimeoutSeconds, MaxConnectionsPerCaller, ElicitationTtlSeconds, RequireDistinctApprover);
+    }
 
     public async Task RunAsync(CancellationToken ct)
     {
+        ValidateConfiguration();
         var security = _securityFactory.Build();
         _logger.LogInformation("Opening pipe {Pipe} with {Slots} slots", PipeName, MaxInstances);
 
@@ -787,10 +825,13 @@ public sealed class ApprovalPipeServer
     }
 
     private string PipeName => _config["Elicitation:ApprovalPipeName"] ?? "McpBroker.Approvals";
-    private int MaxInstances => int.TryParse(_config["Elicitation:ApprovalPipeInstances"], out var n) ? n : 4;
+    private int MaxInstances => ConfigReader.Int(_config, "Elicitation:ApprovalPipeInstances", 4, 1, 254);
+
+    internal void ValidateConfiguration() => _ = MaxInstances;
 
     public async Task RunAsync(CancellationToken ct)
     {
+        ValidateConfiguration();
         var sids = _approverSids.ToArray();
         if (sids.Length == 0)
         {
