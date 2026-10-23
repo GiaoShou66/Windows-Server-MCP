@@ -1,0 +1,17 @@
+@{
+    GUID = '50e7afbe-ad99-4814-b4d4-1761ab346367'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates predictive analysis capabilities registered with System Insights on this host.'
+    ModulesToImport = @('Get-BrokerSystemInsightsCapabilities')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerSystemInsightsCapabilities'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

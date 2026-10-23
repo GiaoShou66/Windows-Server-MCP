@@ -1,0 +1,17 @@
+@{
+    GUID = 'f24b8133-ff27-4c8a-b7b4-3354ac6c22c9'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates the AD RMS super user group members on this cluster.'
+    ModulesToImport = @('Get-BrokerRmsSuperUsers')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerRmsSuperUsers'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

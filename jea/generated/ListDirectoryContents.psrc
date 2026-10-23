@@ -1,0 +1,20 @@
+@{
+    GUID = 'f30aad22-e705-4883-8b9d-e600937482ed'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Lists files and folders under a given absolute path (File Services file manager). Metadata only — no file content is ever read.'
+    ModulesToImport = @('Get-BrokerListDirectory')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerListDirectory'
+                Parameters = @(
+                    @{ Name = 'Path'; ValidatePattern = '^(?!.*\.\.)[A-Za-z]:\\.*$' }
+                )
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

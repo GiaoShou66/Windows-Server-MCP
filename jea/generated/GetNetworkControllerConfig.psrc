@@ -1,0 +1,17 @@
+@{
+    GUID = '3b7cc2ed-20ec-44b4-9758-070abcf2add9'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns this Network Controller''s REST endpoint and node configuration.'
+    ModulesToImport = @('Get-BrokerNetworkControllerConfig')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerNetworkControllerConfig'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

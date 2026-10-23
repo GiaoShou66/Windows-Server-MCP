@@ -1,0 +1,17 @@
+@{
+    GUID = '854e33c5-32b4-4a07-8e23-632fac7e0cb5'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns the effective audit policy subcategory settings on this host (auditpol).'
+    ModulesToImport = @('Get-BrokerAuditPolicy')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAuditPolicy'
+    }
+    )
+    VisibleExternalCommands = @('auditpol.exe')
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

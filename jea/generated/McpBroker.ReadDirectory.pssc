@@ -1,0 +1,16 @@
+@{
+    SchemaVersion = '2.0.0.0'
+    GUID = 'dc2c37d3-49e3-4a95-a152-a42363589d7a'
+    Author = 'mcp-broker-generator'
+    Description = 'MCP broker endpoint: McpBroker.ReadDirectory'
+    SessionType = 'RestrictedRemoteServer'
+    RunAsVirtualAccount = $false
+GroupManagedServiceAccount = 'McpBrokerSvc$'
+    TranscriptDirectory = 'C:\McpBroker\Transcripts'
+    RoleDefinitions = @{
+'CONTOSO\McpBrokerCallers' = @{ RoleCapabilities = @('QueryAdUser', 'ListGroupPolicies', 'ListAdComputers', 'ListAdGroups', 'GetDomainPasswordPolicy', 'ListFineGrainedPasswordPolicies', 'ListAdOrganizationalUnits', 'ListReadOnlyDomainControllers') }
+    }
+    LanguageMode = 'NoLanguage'
+    ExecutionPolicy = 'Restricted'
+    MountUserDrive = $false
+}

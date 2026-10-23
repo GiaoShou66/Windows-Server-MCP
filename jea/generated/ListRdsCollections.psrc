@@ -1,0 +1,17 @@
+@{
+    GUID = '3824bd84-3215-40b8-831e-bf704aaef38e'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates RemoteApp/session collections on this RD Connection Broker.'
+    ModulesToImport = @('Get-BrokerRdsCollections')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerRdsCollections'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

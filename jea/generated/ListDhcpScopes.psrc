@@ -1,0 +1,17 @@
+@{
+    GUID = 'e17e1022-86c8-45e2-8a11-cdf44616ec4e'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates IPv4 scopes on this DHCP server.'
+    ModulesToImport = @('Get-BrokerDhcpScopes')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerDhcpScopes'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

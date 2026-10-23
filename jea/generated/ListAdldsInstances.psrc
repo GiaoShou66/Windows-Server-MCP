@@ -1,0 +1,17 @@
+@{
+    GUID = 'b4a0bbad-e5f7-48db-b8ac-9562fe78921e'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates AD Lightweight Directory Services instances on this host (via their ADAM_* service registrations; AD LDS ships no dedicated enumeration cmdlet).'
+    ModulesToImport = @('Get-BrokerAdldsInstances')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAdldsInstances'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

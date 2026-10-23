@@ -1,0 +1,20 @@
+@{
+    GUID = '3775a2de-4f5e-4bbc-bb94-2e9f71d44c80'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns counts of tool invocations per caller/day from JEA transcripts over a bounded window.'
+    ModulesToImport = @('Get-BrokerTranscriptSummary')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerTranscriptSummary'
+                Parameters = @(
+                    @{ Name = 'DaysBack'; ValidateRange = 1,30 }
+                )
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

@@ -1,0 +1,17 @@
+@{
+    GUID = '37d1d99e-8c33-4d7c-9102-c57cc5b4ab87'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns the PowerShell execution policy at every scope (MachinePolicy, UserPolicy, Process, CurrentUser, LocalMachine).'
+    ModulesToImport = @('Get-BrokerExecutionPolicy')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerExecutionPolicy'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

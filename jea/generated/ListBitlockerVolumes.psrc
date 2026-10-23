@@ -1,0 +1,17 @@
+@{
+    GUID = 'fd5a57d4-3915-4705-911e-ab0681c5a14e'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates volumes and their BitLocker protection status on this host.'
+    ModulesToImport = @('Get-BrokerBitlockerVolumes')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerBitlockerVolumes'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

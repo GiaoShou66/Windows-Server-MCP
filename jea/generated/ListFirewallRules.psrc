@@ -1,0 +1,17 @@
+@{
+    GUID = '185e616b-5f46-4151-a4e3-7c219dfc79a3'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates enabled Windows Firewall rules on this host.'
+    ModulesToImport = @('Get-BrokerFirewallRules')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerFirewallRules'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

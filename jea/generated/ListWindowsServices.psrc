@@ -1,0 +1,17 @@
+@{
+    GUID = 'a8162cb4-a67b-4d7b-90ec-99e6bdcad168'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates services and their run state on this host.'
+    ModulesToImport = @('Get-BrokerWindowsServices')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerWindowsServices'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

@@ -1,0 +1,17 @@
+@{
+    GUID = '3cf48fc0-4aeb-45b2-9557-87b7a4d919bb'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates virtual machines on this Hyper-V host.'
+    ModulesToImport = @('Get-BrokerHyperVVms')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerHyperVVms'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

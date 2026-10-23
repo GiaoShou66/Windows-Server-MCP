@@ -1,0 +1,17 @@
+@{
+    GUID = '7e7df45c-e2d6-4943-b2fc-9aa8c96dea36'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates relying party trusts configured on this AD FS server.'
+    ModulesToImport = @('Get-BrokerAdfsRelyingParties')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAdfsRelyingParties'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

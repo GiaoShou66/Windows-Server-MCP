@@ -1,0 +1,17 @@
+@{
+    GUID = '946adedb-37d8-49a7-9027-b13bc428b981'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates local (non-domain) groups on this host.'
+    ModulesToImport = @('Get-BrokerLocalGroups')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerLocalGroups'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

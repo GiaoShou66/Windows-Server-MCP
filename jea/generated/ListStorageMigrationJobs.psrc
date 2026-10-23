@@ -1,0 +1,17 @@
+@{
+    GUID = '3bb9e457-d54c-447a-974d-c1287de440f8'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates Storage Migration Service jobs configured on this host.'
+    ModulesToImport = @('Get-BrokerStorageMigrationJobs')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerStorageMigrationJobs'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

@@ -1,0 +1,20 @@
+@{
+    GUID = '31f75270-86af-4a33-aea5-b00fbc6ba00a'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates members of a built-in local group (Administrators, Remote Desktop Users, etc.).'
+    ModulesToImport = @('Get-BrokerLocalGroupMembers')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerLocalGroupMembers'
+                Parameters = @(
+                    @{ Name = 'GroupName'; ValidateSet = 'Administrators','Users','Remote Desktop Users','Backup Operators','Power Users','Guests' }
+                )
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

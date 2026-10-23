@@ -1,0 +1,17 @@
+@{
+    GUID = 'a52f7f00-6009-4557-8118-474a3cdf274b'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates nodes in the local failover cluster.'
+    ModulesToImport = @('Get-BrokerClusterNodes')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerClusterNodes'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

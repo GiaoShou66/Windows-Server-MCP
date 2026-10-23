@@ -1,0 +1,20 @@
+@{
+    GUID = '05d8e11e-d6ec-4dbe-9e19-89c152a4b904'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates installed/available Windows Server roles and features (Server Manager).'
+    ModulesToImport = @('Get-BrokerWindowsFeatures')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerWindowsFeatures'
+                Parameters = @(
+                    @{ Name = 'InstalledOnly'; ValidateSet = 'true','false' }
+                )
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

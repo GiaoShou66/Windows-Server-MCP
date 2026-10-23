@@ -1,0 +1,17 @@
+@{
+    GUID = '38220f6f-f0bf-40df-b0c6-7c8260cf9f69'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates network adapters and their IP configuration on this host.'
+    ModulesToImport = @('Get-BrokerNetworkAdapters')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerNetworkAdapters'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

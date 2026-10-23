@@ -1,0 +1,17 @@
+@{
+    GUID = 'de2b87cf-9adf-49da-9a76-873ff2f0a161'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates IIS sites on this host (name, state, bindings, physical path) via WebAdministration.'
+    ModulesToImport = @('Get-BrokerIisSites')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerIisSites'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

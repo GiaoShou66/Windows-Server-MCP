@@ -1,0 +1,17 @@
+@{
+    GUID = '7d7a738a-7cad-4e35-a811-4617a2ba6254'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates scheduled tasks and their state on this host.'
+    ModulesToImport = @('Get-BrokerScheduledTasks')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerScheduledTasks'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

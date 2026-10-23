@@ -1,0 +1,17 @@
+@{
+    GUID = '0da22969-272a-44f1-a69b-4370581d7e94'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates local (non-domain) user accounts on this host.'
+    ModulesToImport = @('Get-BrokerLocalUsers')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerLocalUsers'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

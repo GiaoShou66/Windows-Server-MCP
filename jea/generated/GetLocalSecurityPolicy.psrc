@@ -1,0 +1,17 @@
+@{
+    GUID = '875e7304-a45e-430d-8a43-1d08482591da'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns local password and account lockout policy settings (secedit SECURITYPOLICY export).'
+    ModulesToImport = @('Get-BrokerLocalSecurityPolicy')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerLocalSecurityPolicy'
+    }
+    )
+    VisibleExternalCommands = @('secedit.exe')
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

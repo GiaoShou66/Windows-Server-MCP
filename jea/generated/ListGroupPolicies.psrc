@@ -1,0 +1,17 @@
+@{
+    GUID = 'c1af078d-5985-4816-8b74-dcc9a7e87300'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates GPOs in the domain (name, status, link state) via the GroupPolicy module.'
+    ModulesToImport = @('Get-BrokerGroupPolicies')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerGroupPolicies'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

@@ -1,0 +1,17 @@
+@{
+    GUID = '153ca205-d118-4361-9462-a58c925d4213'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates boot images on this Windows Deployment Services server.'
+    ModulesToImport = @('Get-BrokerWdsBootImages')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerWdsBootImages'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

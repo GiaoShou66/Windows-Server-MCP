@@ -1,0 +1,20 @@
+@{
+    GUID = '39239563-6f46-4589-aafe-b1c4f99a6a50'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns a limited AD user profile by sAMAccountName.'
+    ModulesToImport = @('Get-BrokerAdUser')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAdUser'
+                Parameters = @(
+                    @{ Name = 'SamAccountName'; ValidatePattern = '^[a-zA-Z0-9._-]{1,64}$' }
+                )
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

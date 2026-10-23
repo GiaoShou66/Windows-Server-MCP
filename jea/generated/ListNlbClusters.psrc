@@ -1,0 +1,17 @@
+@{
+    GUID = '85d32d1f-6ebf-49c4-b411-b0afd3bcd640'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates Network Load Balancing clusters configured on this host.'
+    ModulesToImport = @('Get-BrokerNlbClusters')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerNlbClusters'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

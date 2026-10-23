@@ -1,0 +1,17 @@
+@{
+    GUID = 'd8864747-25e2-40c5-ab45-a5fb15f1066b'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates zones hosted on this DNS server.'
+    ModulesToImport = @('Get-BrokerDnsZones')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerDnsZones'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

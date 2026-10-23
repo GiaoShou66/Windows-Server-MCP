@@ -1,0 +1,17 @@
+@{
+    GUID = '3e90b7c0-9ac1-4491-a0aa-af8a12fad4c2'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates local security policy user rights assignments (secedit USER_RIGHTS export).'
+    ModulesToImport = @('Get-BrokerUserRightsAssignments')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerUserRightsAssignments'
+    }
+    )
+    VisibleExternalCommands = @('secedit.exe')
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

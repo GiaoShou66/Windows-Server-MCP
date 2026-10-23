@@ -1,0 +1,17 @@
+@{
+    GUID = 'f53af84b-0bca-4906-884d-5c3ad89f88d0'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns WinRM service state and configured listeners (transport/address/port) for PowerShell Remoting on this host.'
+    ModulesToImport = @('Get-BrokerPsRemotingStatus')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerPsRemotingStatus'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

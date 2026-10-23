@@ -1,0 +1,17 @@
+@{
+    GUID = '211f0a47-8841-4554-869e-1697fbd9899c'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates RODCs in the domain (AD DS).'
+    ModulesToImport = @('Get-BrokerReadOnlyDomainControllers')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerReadOnlyDomainControllers'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

@@ -1,0 +1,17 @@
+@{
+    GUID = '6b3d7d2c-a011-42aa-9b49-6614361e31b6'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates organizational units in the domain (the containers GPOs link to).'
+    ModulesToImport = @('Get-BrokerAdOrganizationalUnits')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAdOrganizationalUnits'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

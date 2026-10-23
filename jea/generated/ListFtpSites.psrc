@@ -1,0 +1,17 @@
+@{
+    GUID = '3f27a6f9-36a7-4dba-8e3f-7fa401b9ae00'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates FTP sites on this host (IIS 10.0 FTP Server role).'
+    ModulesToImport = @('Get-BrokerFtpSites')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerFtpSites'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

@@ -1,0 +1,15 @@
+@{
+    SchemaVersion = '2.0.0.0'
+    GUID = '0ffe8e08-40e8-47e2-ad1e-59ea529eb87d'
+    Author = 'mcp-broker-generator'
+    Description = 'MCP broker endpoint: McpBroker.ReadLocal'
+    SessionType = 'RestrictedRemoteServer'
+    RunAsVirtualAccount = $true
+    TranscriptDirectory = 'C:\McpBroker\Transcripts'
+    RoleDefinitions = @{
+'CONTOSO\McpBrokerCallers' = @{ RoleCapabilities = @('ListJeaEndpoints', 'SummarizeTranscripts', 'ListWindowsFeatures', 'ListIisSites', 'ListCertificateAuthorities', 'ListAdfsRelyingParties', 'ListDhcpScopes', 'ListDnsZones', 'ListSmbShares', 'ListDisks', 'ListStoragePools', 'ListHyperVVms', 'ListPrinters', 'ListRdsCollections', 'ListWsusUpdates', 'ListWdsBootImages', 'ListClusterNodes', 'ListBitlockerVolumes', 'ListFirewallRules', 'ListNlbClusters', 'ListNetworkAdapters', 'ListWindowsServices', 'ListLocalUsers', 'ListScheduledTasks', 'ListAdldsInstances', 'ListRmsSuperUsers', 'GetHgsStatus', 'GetNetworkControllerConfig', 'GetRemoteAccessStatus', 'ListStorageMigrationJobs', 'ListSystemInsightsCapabilities', 'GetLocalSecurityPolicy', 'GetAuditPolicy', 'ListUserRightsAssignments', 'ListLocalGroups', 'ListLocalGroupMembers', 'ListDirectoryContents', 'ListFtpSites', 'GetExecutionPolicy', 'GetPsRemotingStatus', 'GetAppLockerPolicy') }
+    }
+    LanguageMode = 'NoLanguage'
+    ExecutionPolicy = 'Restricted'
+    MountUserDrive = $false
+}

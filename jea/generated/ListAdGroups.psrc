@@ -1,0 +1,17 @@
+@{
+    GUID = '0ceb55cb-2511-4582-be78-fc4f5ee64771'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates security/distribution groups in the domain (AD DS).'
+    ModulesToImport = @('Get-BrokerAdGroups')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAdGroups'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

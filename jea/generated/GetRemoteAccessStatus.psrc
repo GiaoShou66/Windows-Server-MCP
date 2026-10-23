@@ -1,0 +1,17 @@
+@{
+    GUID = '949895e5-9785-4198-a98a-0fa5b107d2b5'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns VPN/DirectAccess role status on this Remote Access server (covers the RRAS portion of Network Policy and Access Services).'
+    ModulesToImport = @('Get-BrokerRemoteAccessStatus')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerRemoteAccessStatus'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

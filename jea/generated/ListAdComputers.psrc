@@ -1,0 +1,17 @@
+@{
+    GUID = '4c7b32c5-e515-4a30-bc3e-84a975460fe8'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates computer accounts in the domain (AD DS).'
+    ModulesToImport = @('Get-BrokerAdComputers')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAdComputers'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

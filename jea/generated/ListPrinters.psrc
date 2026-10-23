@@ -1,0 +1,17 @@
+@{
+    GUID = 'af490155-f4a0-41a0-8ee5-7105562f49fd'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates shared printers on this print server (Print and Document Services).'
+    ModulesToImport = @('Get-BrokerPrinters')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerPrinters'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

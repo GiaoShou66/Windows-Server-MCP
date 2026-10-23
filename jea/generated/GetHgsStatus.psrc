@@ -1,0 +1,17 @@
+@{
+    GUID = '92a91ce5-0a61-49cb-bf79-179c2468b51e'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns the operation mode and configuration status of this Host Guardian Service.'
+    ModulesToImport = @('Get-BrokerHgsStatus')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerHgsStatus'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

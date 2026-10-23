@@ -1,0 +1,17 @@
+@{
+    GUID = 'e9bb0c61-74ea-4489-ba17-36dcbf168bda'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates Storage Spaces pools on this host.'
+    ModulesToImport = @('Get-BrokerStoragePools')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerStoragePools'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

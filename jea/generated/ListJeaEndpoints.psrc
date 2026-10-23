@@ -1,0 +1,17 @@
+@{
+    GUID = 'aa6bbe36-4aa6-4981-8719-60102bdfead8'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates registered PSSessionConfiguration endpoints on this host.'
+    ModulesToImport = @('Get-BrokerJeaEndpoints')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerJeaEndpoints'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

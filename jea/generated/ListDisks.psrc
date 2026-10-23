@@ -1,0 +1,17 @@
+@{
+    GUID = '1de83066-3762-445f-948c-9d4612772d5a'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates physical disks and partitions on this host (Storage).'
+    ModulesToImport = @('Get-BrokerDisks')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerDisks'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

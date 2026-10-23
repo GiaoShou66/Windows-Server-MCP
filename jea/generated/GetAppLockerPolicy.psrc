@@ -1,0 +1,17 @@
+@{
+    GUID = '6b274c15-dbf7-40e8-a8ad-7f1779855929'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Returns the effective AppLocker rule collections and enforcement mode on this host.'
+    ModulesToImport = @('Get-BrokerAppLockerPolicy')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerAppLockerPolicy'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}

@@ -1,0 +1,17 @@
+@{
+    GUID = 'b96e6a29-b157-4983-a1b4-c15d328b3c6c'
+    Author = 'mcp-broker-generator'
+    CompanyName = 'internal'
+    Copyright = ''
+    Description = 'Enumerates updates awaiting approval on this WSUS server.'
+    ModulesToImport = @('Get-BrokerWsusUpdates')
+    VisibleCmdlets = @(
+    @{
+        Name = 'Get-BrokerWsusUpdates'
+    }
+    )
+    VisibleExternalCommands = @()
+    VisibleFunctions = @()
+    VisibleAliases = @()
+    VisibleProviders = @()
+}
