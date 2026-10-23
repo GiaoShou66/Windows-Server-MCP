@@ -39,10 +39,15 @@ if (Test-Path $ModulesSourceDir) {
         $moduleName = $_.BaseName
         $dest = Join-Path $SystemModulesRoot $moduleName
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
-        Copy-Item -Path $_.FullName -Destination (Join-Path $dest "$moduleName.psm1") -Force
+        $installed = Join-Path $dest "$moduleName.psm1"
+        Copy-Item -Path $_.FullName -Destination $installed -Force
         $sig = Get-AuthenticodeSignature -FilePath $_.FullName
         if ($sig.Status -ne 'Valid') {
             Write-Warning "Module $moduleName is not validly signed (status: $($sig.Status)). The broker will refuse it at call time."
+        }
+        if ((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash) {
+            throw "Installed module hash mismatch for $moduleName."
         }
         Write-Host "Installed wrapper module: $moduleName"
     }

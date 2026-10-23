@@ -1,5 +1,5 @@
 @{
-    GUID = '211f0a47-8841-4554-869e-1697fbd9899c'
+    GUID = 'db14c8dc-549f-4e08-bef1-ef29c2ea3a83'
     Author = 'mcp-broker-generator'
     CompanyName = 'internal'
     Copyright = ''

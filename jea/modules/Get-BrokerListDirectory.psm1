@@ -41,6 +41,21 @@ function Get-BrokerListDirectory {
         }
     }
 
+    # Do not follow a junction, symlink, mount point, or other reparse point supplied
+    # as the requested path. This is defense in depth; the service account ACL remains
+    # the authoritative filesystem boundary.
+    $current = [System.IO.Path]::GetPathRoot($Path).TrimEnd('\')
+    foreach ($part in $Path.Substring($current.Length).Trim('\').Split('\')) {
+        if ([string]::IsNullOrEmpty($part)) { continue }
+        $current = Join-Path $current $part
+        if (Test-Path -LiteralPath $current) {
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Access to '$Path' is denied by policy (reparse point)."
+            }
+        }
+    }
+
     Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | Select-Object -First 500 | ForEach-Object {
         [pscustomobject]@{
             Name          = $_.Name

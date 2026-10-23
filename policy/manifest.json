@@ -696,6 +696,104 @@
       "parameters": [],
       "untrustedInputSources": [],
       "maskedFields": []
+    },
+    {
+      "toolId": "set-scheduled-task-state",
+      "displayName": "Enable or Disable a Scheduled Task",
+      "description": "Enables or disables an existing scheduled task. Reversible (can be re-enabled/disabled). First write-tier tool — requires human elicitation approval from a distinct approver identity.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerScheduledTaskState.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetScheduledTaskState", "cmdlet": "Set-BrokerScheduledTaskState", "moduleName": "Set-BrokerScheduledTaskState", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        {
+          "name": "TaskPath",
+          "type": "string",
+          "required": true,
+          "allowlist": { "regexPattern": "^\\\\[\\\\A-Za-z0-9 _.-]*\\\\$", "maxLength": 260 }
+        },
+        {
+          "name": "TaskName",
+          "type": "string",
+          "required": true,
+          "allowlist": { "regexPattern": "^[A-Za-z0-9 _.-]{1,260}$" }
+        },
+        {
+          "name": "Enabled",
+          "type": "bool",
+          "required": true,
+          "allowlist": { "enumValues": ["true", "false"] }
+        }
+      ],
+      "resourceAllowlist": {
+        "TaskPath": []
+      },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-windows-service-state",
+      "displayName": "Start or Stop a Windows Service",
+      "description": "Starts or stops a non-critical Windows service. Reversible. A fixed denylist of critical services (AD DS, Netlogon, KDC, time sync, RPC, DCOM, WinRM, the broker's own service) is enforced inside the wrapper and cannot be overridden by a caller-supplied name.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerWindowsServiceState.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetWindowsServiceState", "cmdlet": "Set-BrokerWindowsServiceState", "moduleName": "Set-BrokerWindowsServiceState", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        {
+          "name": "ServiceName",
+          "type": "string",
+          "required": true,
+          "allowlist": { "regexPattern": "^[A-Za-z0-9_.-]{1,80}$" }
+        },
+        {
+          "name": "Action",
+          "type": "string",
+          "required": true,
+          "allowlist": { "enumValues": ["Start", "Stop"] }
+        }
+      ],
+      "resourceAllowlist": {
+        "ServiceName": []
+      },
+      "untrustedInputSources": [],
+      "maskedFields": []
+    },
+    {
+      "toolId": "set-firewall-rule-enabled",
+      "displayName": "Enable or Disable a Firewall Rule",
+      "description": "Enables or disables an existing Windows Firewall rule by name. Reversible — does not create or delete rules.",
+      "server": { "serverId": "mcp-broker-builtin", "path": "C:\\McpBroker\\jea\\Set-BrokerFirewallRuleEnabled.psm1", "signatureThumbprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "provenance": "internal-signed" },
+      "riskTier": "write",
+      "requiresElicitation": true,
+      "jeaMapping": { "endpointName": "McpBroker.Write", "roleCapabilityName": "SetFirewallRuleEnabled", "cmdlet": "Set-BrokerFirewallRuleEnabled", "moduleName": "Set-BrokerFirewallRuleEnabled", "accessGroup": "CONTOSO\\McpBrokerCallers", "useGmsa": false },
+      "parameters": [
+        {
+          "name": "RuleName",
+          "type": "string",
+          "required": true,
+          "allowlist": { "regexPattern": "^[A-Za-z0-9 _.-]{1,260}$" }
+        },
+        {
+          "name": "Enabled",
+          "type": "bool",
+          "required": true,
+          "allowlist": { "enumValues": ["true", "false"] }
+        }
+      ],
+      "resourceAllowlist": {
+        "RuleName": []
+      },
+      "untrustedInputSources": [],
+      "maskedFields": []
     }
-  ]
+  ],
+  "workflowPolicies": {
+    "privilegedAdGroups": [
+      "Domain Admins",
+      "Enterprise Admins",
+      "Administrators"
+    ],
+    "healthCheckServers": []
+  }
 }

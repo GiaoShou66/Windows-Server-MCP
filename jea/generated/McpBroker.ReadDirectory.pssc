@@ -1,6 +1,6 @@
 @{
     SchemaVersion = '2.0.0.0'
-    GUID = 'dc2c37d3-49e3-4a95-a152-a42363589d7a'
+    GUID = 'adf23f64-a0dd-4f78-9713-35695dc1cdda'
     Author = 'mcp-broker-generator'
     Description = 'MCP broker endpoint: McpBroker.ReadDirectory'
     SessionType = 'RestrictedRemoteServer'
