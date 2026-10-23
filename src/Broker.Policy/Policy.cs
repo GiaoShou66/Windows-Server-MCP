@@ -32,7 +32,7 @@ public sealed class ParameterValidator
                 continue;
             }
 
-            var reason = CheckOne(p, value!);
+            var reason = CheckOne(p, value);
             if (reason is not null) return PolicyDecision.Deny(reason);
 
             if (tool.ResourceAllowlist.TryGetValue(p.Name, out var allowedResources) &&
@@ -43,8 +43,16 @@ public sealed class ParameterValidator
         return PolicyDecision.Allow();
     }
 
-    private static string? CheckOne(ToolParameter p, string value)
+    private static string? CheckOne(ToolParameter p, string? value)
     {
+        if (value is null) return $"parameter-null:{p.Name}";
+
+        // A control character is never legitimate in any shipped parameter, and .NET's `$`
+        // anchor matches before a trailing "\n", so a regex-valid value could otherwise smuggle
+        // one through. Rejected unconditionally, before any pattern is consulted.
+        foreach (var ch in value)
+            if (char.IsControl(ch)) return $"parameter-control-character:{p.Name}";
+
         var a = p.Allowlist;
 
         if (a.MaxLength is { } max && value.Length > max)

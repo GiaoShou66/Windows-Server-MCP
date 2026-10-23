@@ -1,0 +1,6 @@
+# Integrity-hashed policy files must be byte-identical on every checkout. The manifest's
+# SHA-256 sidecar is computed over the exact bytes, so CRLF conversion (core.autocrlf)
+# would make the broker reject its own manifest and load zero tools.
+policy/manifest.json text eol=lf
+policy/manifest.json.sha256 text eol=lf
+policy/tool-manifest.schema.json text eol=lf
