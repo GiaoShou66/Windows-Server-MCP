@@ -710,7 +710,7 @@
           "name": "TaskPath",
           "type": "string",
           "required": true,
-          "allowlist": { "regexPattern": "^\\\\[\\\\A-Za-z0-9 _.-]*\\\\$", "maxLength": 260 }
+          "allowlist": { "regexPattern": "^\\\\(?:(?!\\.+\\\\)[A-Za-z0-9 _.-]+\\\\)*\\z", "maxLength": 260 }
         },
         {
           "name": "TaskName",

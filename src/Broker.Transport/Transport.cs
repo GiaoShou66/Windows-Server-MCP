@@ -23,7 +23,9 @@ public interface IToolCallDispatcher
 }
 
 /// <summary>Everything the broker must show a human (or an approver) to decide one call.</summary>
-public sealed record ElicitationContext(string CorrelationId, string ToolId, string CallerSid, string ParamHash);
+public sealed record ElicitationContext(
+    string CorrelationId, string ToolId, string CallerSid, string ParamHash,
+    IReadOnlyDictionary<string, string>? Parameters = null);
 
 /// <summary>
 /// Requests a human decision for one call and awaits it. The delegate is supplied by the
@@ -44,7 +46,8 @@ public sealed record ElicitationReply(
 
 public sealed record PendingElicitation(
     string CorrelationId, string ToolId, string CallerSid, string ParamHash,
-    DateTimeOffset ExpiresUtc, TaskCompletionSource<ElicitationReply> Tcs);
+    DateTimeOffset ExpiresUtc, TaskCompletionSource<ElicitationReply> Tcs,
+    IReadOnlyDictionary<string, string>? Parameters = null);
 
 /// <summary>
 /// Shared registry that decouples the caller's pipe from the approver's pipe. A dispatch
@@ -68,7 +71,7 @@ public sealed class ElicitationRouter
         var tcs = new TaskCompletionSource<ElicitationReply>(TaskCreationOptions.RunContinuationsAsynchronously);
         var pe = new PendingElicitation(
             ctx.CorrelationId, ctx.ToolId, ctx.CallerSid, ctx.ParamHash,
-            DateTimeOffset.UtcNow.Add(ttl), tcs);
+            DateTimeOffset.UtcNow.Add(ttl), tcs, ctx.Parameters);
         lock (_pendingLock)
             _pending[ctx.CorrelationId] = pe;
 
@@ -132,6 +135,82 @@ public sealed class ElicitationRouter
 }
 
 /// <summary>
+/// Strict configuration reads. An absent key takes the documented default; a key that is present but
+/// not a valid value stops startup. It never silently becomes a default, because a typo that quietly
+/// changes a security bound is worse than a service that refuses to start. Messages name the key,
+/// never the value.
+/// </summary>
+public static class ConfigReader
+{
+    public static int Int(IConfiguration config, string key, int fallback, int min = 1, int max = int.MaxValue)
+    {
+        var raw = config[key];
+        if (raw is null) return fallback;
+
+        if (!int.TryParse(raw, System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out var value) ||
+            raw.StartsWith('+') || value < min || value > max)
+            throw new InvalidOperationException($"Configuration value '{key}' must be an integer between {min} and {max}.");
+
+        return value;
+    }
+
+    public static bool Bool(IConfiguration config, string key, bool fallback)
+    {
+        var raw = config[key];
+        if (raw is null) return fallback;
+        if (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase)) return false;
+        throw new InvalidOperationException($"Configuration value '{key}' must be 'true' or 'false'.");
+    }
+}
+
+/// <summary>
+/// Validation of the principals a pipe ACL may name. Pure string logic, so it is enforced and
+/// tested identically on every platform. A pipe client must be an explicitly provisioned user or
+/// group: the broad well-known principals (and the broad domain groups) are refused outright,
+/// because "never use Everyone" written in documentation is not a control.
+/// </summary>
+internal static class PipePrincipals
+{
+    private static readonly System.Text.RegularExpressions.Regex SidSyntax =
+        new(@"^S-1-[0-9]+(-[0-9]+)+\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static readonly HashSet<string> TooBroad = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "S-1-1-0",        // Everyone
+        "S-1-2-0",        // Local
+        "S-1-5-2",        // Network
+        "S-1-5-4",        // Interactive
+        "S-1-5-7",        // Anonymous
+        "S-1-5-11",       // Authenticated Users
+        "S-1-5-15",       // This Organization
+        "S-1-5-32-545",   // BUILTIN\Users
+        "S-1-5-32-546"    // BUILTIN\Guests
+    };
+
+    // Domain Users, Domain Guests, Domain Computers: RIDs of the broad per-domain groups.
+    private static readonly string[] BroadDomainRids = { "-513", "-514", "-515" };
+
+    public static void Validate(IReadOnlyCollection<string> sids)
+    {
+        if (sids.Count == 0)
+            throw new InvalidOperationException("No allowed SIDs supplied — refusing to open an unrestricted pipe.");
+
+        foreach (var sid in sids)
+        {
+            if (string.IsNullOrWhiteSpace(sid) || !SidSyntax.IsMatch(sid))
+                throw new InvalidOperationException("A configured pipe SID is not a valid SID string.");
+
+            if (TooBroad.Contains(sid) ||
+                (sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase) &&
+                 BroadDomainRids.Any(rid => sid.EndsWith(rid, StringComparison.Ordinal))))
+                throw new InvalidOperationException($"Pipe SID {sid} is too broad to be a pipe client.");
+        }
+    }
+}
+
+/// <summary>
 /// Builds an allowlist-only ACL for the pipe. No Everyone / Authenticated Users:
 /// a caller must be an explicitly provisioned SID, plus the service's own identity.
 /// </summary>
@@ -152,8 +231,7 @@ public sealed class PipeSecurityFactory
     /// <summary>Builds an allowlist-only ACL for the given caller SIDs plus the service identity.</summary>
     public PipeSecurity BuildFor(IReadOnlyCollection<string> sids)
     {
-        if (sids.Count == 0)
-            throw new InvalidOperationException("No allowed SIDs supplied — refusing to open an unrestricted pipe.");
+        PipePrincipals.Validate(sids);
 
         var security = new PipeSecurity();
         foreach (var sidString in sids)
@@ -239,8 +317,47 @@ public static class McpFraming
 }
 
 /// <summary>
+/// Caps how many pipe connections one caller may hold at once, so a single authorized (or
+/// compromised) client cannot occupy every slot and lock everyone else out.
+/// </summary>
+internal sealed class PerCallerConnectionLimiter
+{
+    private readonly int _maxPerCaller;
+    private readonly object _lock = new();
+    private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
+
+    public PerCallerConnectionLimiter(int maxPerCaller)
+    {
+        if (maxPerCaller < 1) throw new ArgumentOutOfRangeException(nameof(maxPerCaller));
+        _maxPerCaller = maxPerCaller;
+    }
+
+    public bool TryAcquire(string callerSid)
+    {
+        if (string.IsNullOrWhiteSpace(callerSid)) return false;
+        lock (_lock)
+        {
+            _counts.TryGetValue(callerSid, out var n);
+            if (n >= _maxPerCaller) return false;
+            _counts[callerSid] = n + 1;
+            return true;
+        }
+    }
+
+    public void Release(string callerSid)
+    {
+        lock (_lock)
+        {
+            if (!_counts.TryGetValue(callerSid, out var n)) return;
+            if (n <= 1) _counts.Remove(callerSid); else _counts[callerSid] = n - 1;
+        }
+    }
+}
+
+/// <summary>
 /// Multi-instance named pipe listener. Fixed slot count bounds resource use.
-/// Each connection gets a per-frame timeout so a stalled client cannot hold a slot.
+/// Each connection gets a per-frame timeout so a stalled client cannot hold a slot, a bounded
+/// number of in-flight requests, and a bounded tolerance for malformed messages.
 /// </summary>
 public sealed class NamedPipeServer
 {
@@ -265,22 +382,37 @@ public sealed class NamedPipeServer
     }
 
     private string PipeName => _config["Pipe:Name"] ?? "McpBroker";
-    private int MaxInstances => int.TryParse(_config["Pipe:MaxInstances"], out var n) ? n : 8;
-    private int FrameTimeoutSeconds => int.TryParse(_config["Pipe:FrameTimeoutSeconds"], out var n) ? n : 5;
-    private int ElicitationTtlSeconds => int.TryParse(_config["Elicitation:TtlSeconds"], out var n) ? n : 120;
-    private bool RequireDistinctApprover =>
-        bool.TryParse(_config["Elicitation:RequireDistinctApprover"], out var b) && b;
+    private int MaxInstances => ConfigReader.Int(_config, "Pipe:MaxInstances", 8, 1, 254);
+    private int FrameTimeoutSeconds => ConfigReader.Int(_config, "Pipe:FrameTimeoutSeconds", 5);
+    private int MaxInFlightPerConnection => ConfigReader.Int(_config, "Pipe:MaxInFlightPerConnection", 16);
+    private int MaxMalformedRequests => ConfigReader.Int(_config, "Pipe:MaxMalformedRequests", 5);
+    private int WriteTimeoutSeconds => ConfigReader.Int(_config, "Pipe:WriteTimeoutSeconds", 10);
+    private int MaxConnectionsPerCaller => ConfigReader.Int(_config, "Pipe:MaxConnectionsPerCaller", Math.Max(1, MaxInstances / 2));
+    private int ElicitationTtlSeconds => ConfigReader.Int(_config, "Elicitation:TtlSeconds", 120);
+    private bool RequireDistinctApprover => ConfigReader.Bool(_config, "Elicitation:RequireDistinctApprover", false);
+
+    /// <summary>
+    /// Reads every setting once. Called before the pipe opens so an invalid value stops startup
+    /// instead of surfacing on the first connection, or being replaced by a default.
+    /// </summary>
+    internal void ValidateConfiguration()
+    {
+        _ = (MaxInstances, FrameTimeoutSeconds, MaxInFlightPerConnection, MaxMalformedRequests,
+             WriteTimeoutSeconds, MaxConnectionsPerCaller, ElicitationTtlSeconds, RequireDistinctApprover);
+    }
 
     public async Task RunAsync(CancellationToken ct)
     {
+        ValidateConfiguration();
         var security = _securityFactory.Build();
         _logger.LogInformation("Opening pipe {Pipe} with {Slots} slots", PipeName, MaxInstances);
 
-        var slots = Enumerable.Range(0, MaxInstances).Select(i => AcceptLoopAsync(i, security, ct));
+        var limiter = new PerCallerConnectionLimiter(MaxConnectionsPerCaller);
+        var slots = Enumerable.Range(0, MaxInstances).Select(i => AcceptLoopAsync(i, security, limiter, ct));
         await Task.WhenAll(slots);
     }
 
-    private async Task AcceptLoopAsync(int slot, PipeSecurity security, CancellationToken ct)
+    private async Task AcceptLoopAsync(int slot, PipeSecurity security, PerCallerConnectionLimiter limiter, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -302,9 +434,34 @@ public sealed class NamedPipeServer
             try
             {
                 await stream.WaitForConnectionAsync(ct);
-                var callerSid = CaptureCallerSid(stream);
-                _logger.LogInformation("Slot {Slot}: client connected SID={Sid}", slot, callerSid);
-                await ServeAsync(stream, () => stream.IsConnected, callerSid, ct);
+
+                // A connection whose identity cannot be established is dropped, never served.
+                string callerSid;
+                try
+                {
+                    callerSid = RequireCallerSid(CaptureCallerSid(stream));
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "Slot {Slot}: caller identity could not be established; connection refused", slot);
+                    continue;
+                }
+
+                if (!limiter.TryAcquire(callerSid))
+                {
+                    _logger.LogWarning("Slot {Slot}: SID={Sid} is at its connection limit; connection refused", slot, callerSid);
+                    continue;
+                }
+
+                try
+                {
+                    _logger.LogInformation("Slot {Slot}: client connected SID={Sid}", slot, callerSid);
+                    await ServeAsync(stream, () => stream.IsConnected, callerSid, ct);
+                }
+                finally
+                {
+                    limiter.Release(callerSid);
+                }
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -318,6 +475,15 @@ public sealed class NamedPipeServer
         }
     }
 
+    /// <summary>
+    /// The identity every authorization decision hangs off must exist. A missing or blank
+    /// impersonated SID is an error, not an anonymous caller.
+    /// </summary>
+    internal static string RequireCallerSid(string? sid) =>
+        string.IsNullOrWhiteSpace(sid)
+            ? throw new InvalidOperationException("The connecting client's SID could not be determined.")
+            : sid;
+
     private static string CaptureCallerSid(NamedPipeServerStream stream)
     {
         string sid = string.Empty;
@@ -327,17 +493,44 @@ public sealed class NamedPipeServer
 
     internal async Task ServeAsync(Stream stream, Func<bool> isConnected, string callerSid, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(callerSid))
+        {
+            _logger.LogWarning("Connection without a caller identity refused");
+            return;
+        }
+
         // Reads and dispatches are decoupled. A single reader loop demuxes frames: tool calls
         // start a background dispatch, elicitation replies resolve the waiting dispatch's TCS.
         // The reader never blocks on dispatch, so an in-flight elicitation does not deadlock.
         var pending = new ConcurrentDictionary<string, TaskCompletionSource<ElicitationReply>>();
         var writeLock = new SemaphoreSlim(1, 1);
+        // Cancelled when this connection can no longer be used (a write stalled or failed), which
+        // stops the reader. In-flight dispatches keep the service token: a client that merely
+        // disconnected must not abort a call that is already executing.
+        using var connCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var readToken = connCts.Token;
+        var writeTimeout = TimeSpan.FromSeconds(WriteTimeoutSeconds);
         var inflight = new ConcurrentDictionary<Task, byte>();
+        int malformed = 0;
+        int maxInFlight = MaxInFlightPerConnection;
+        int maxMalformed = MaxMalformedRequests;
 
         async Task WriteFrameLocked(string json)
         {
             await writeLock.WaitAsync(ct);
-            try { await McpFraming.WriteFrameAsync(stream, json, ct); }
+            try
+            {
+                // A client that stops reading must not hold this connection (and a pipe slot) forever.
+                using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                writeCts.CancelAfter(writeTimeout);
+                await McpFraming.WriteFrameAsync(stream, json, writeCts.Token);
+            }
+            catch
+            {
+                // Timed out or failed part-way: the stream may hold half a frame, so it is unusable.
+                try { connCts.Cancel(); } catch (ObjectDisposedException) { }
+                throw;
+            }
             finally { writeLock.Release(); }
         }
 
@@ -353,7 +546,9 @@ public sealed class NamedPipeServer
                 {
                     type = "elicitation/request",
                     correlationId = ectx.CorrelationId,
-                    paramHash = ectx.ParamHash
+                    toolId = ectx.ToolId,
+                    paramHash = ectx.ParamHash,
+                    parameters = ectx.Parameters ?? new Dictionary<string, string>()
                 }));
 
                 using var ttl = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -372,20 +567,31 @@ public sealed class NamedPipeServer
                 ? _router.RequestAsync(ectx, TimeSpan.FromSeconds(ElicitationTtlSeconds), token)
                 : SamePipeAsync(ectx, token));
 
+        async Task RefuseAsync(string reason)
+        {
+            var correlationId = Guid.NewGuid().ToString("N");
+            _logger.LogWarning("Refused message from SID={Sid} ({Corr}): {Reason}", callerSid, correlationId, reason);
+            await WriteFrameLocked(RejectionJson(correlationId, reason));
+        }
+
         try
         {
-            while (!ct.IsCancellationRequested && isConnected())
+            while (!readToken.IsCancellationRequested && isConnected())
             {
                 string? frame;
                 try
                 {
                     frame = await McpFraming.ReadFrameAsync(
-                        stream, TimeSpan.FromSeconds(FrameTimeoutSeconds), ct);
+                        stream, TimeSpan.FromSeconds(FrameTimeoutSeconds), readToken);
                 }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                catch (OperationCanceledException) when (!readToken.IsCancellationRequested)
                 {
                     _logger.LogWarning("Partial-frame timeout, closing connection SID={Sid}", callerSid);
                     break;
+                }
+                catch (OperationCanceledException)
+                {
+                    break;   // service stopping, or the connection was torn down after a failed write
                 }
                 catch (InvalidDataException ex)
                 {
@@ -395,24 +601,37 @@ public sealed class NamedPipeServer
 
                 if (frame is null) break;
 
-                string kind;
                 ToolCallRequest? request = null;
                 ElicitationReply? reply = null;
-                using (var doc = JsonDocument.Parse(frame))
+                try
                 {
-                    var root = doc.RootElement;
-                    kind = root.TryGetProperty("type", out var t) ? t.GetString() ?? "tools/call" : "tools/call";
-
-                    if (kind == "elicitation/reply")
-                        reply = ParseElicitationReply(root, callerSid);
-                    else
-                        request = ParseToolCall(root);
+                    (request, reply) = ParseMessage(frame, callerSid);
+                }
+                catch (Exception ex) when (ex is JsonException or InvalidDataException
+                                              or InvalidOperationException or KeyNotFoundException or FormatException)
+                {
+                    // Framing is intact, only the payload is unusable: refuse it and keep the
+                    // session, but not forever.
+                    _logger.LogWarning(ex, "Malformed message from SID={Sid}", callerSid);
+                    await RefuseAsync("malformed-request");
+                    if (++malformed >= maxMalformed)
+                    {
+                        _logger.LogWarning("Too many malformed messages, closing connection SID={Sid}", callerSid);
+                        break;
+                    }
+                    continue;
                 }
 
                 if (reply is not null)
                 {
                     if (pending.TryGetValue(reply.CorrelationId, out var tcs))
                         tcs.TrySetResult(reply);
+                    continue;
+                }
+
+                if (inflight.Count >= maxInFlight)
+                {
+                    await RefuseAsync("too-many-inflight-requests");
                     continue;
                 }
 
@@ -439,39 +658,86 @@ public sealed class NamedPipeServer
         try
         {
             var result = await _dispatcher.DispatchAsync(request, context, elicitation, ct);
-            await writeFrame(JsonSerializer.Serialize(new
+            var envelope = JsonSerializer.Serialize(new
             {
                 type = "tools/result",
                 correlationId = context.CorrelationId,
                 success = result.Success,
                 rejectReason = result.RejectReason,
                 payload = result.PayloadJson
-            }));
+            });
+
+            // An answer that cannot fit in one frame is reported as such, not as an internal error.
+            if (Encoding.UTF8.GetByteCount(envelope) > McpFraming.MaxPayloadBytes)
+            {
+                _logger.LogWarning("Result for {Tool} ({Corr}) exceeds the frame cap", context.ToolId, context.CorrelationId);
+                envelope = RejectionJson(context.CorrelationId, "response-too-large");
+            }
+
+            await writeFrame(envelope);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Dispatch failed for {Tool} ({Corr})", context.ToolId, context.CorrelationId);
-            try
-            {
-                await writeFrame(JsonSerializer.Serialize(new
-                {
-                    type = "tools/result",
-                    correlationId = context.CorrelationId,
-                    success = false,
-                    rejectReason = "internal-error",
-                    payload = (string?)null
-                }));
-            }
+            try { await writeFrame(RejectionJson(context.CorrelationId, "internal-error")); }
             catch { /* connection likely gone */ }
         }
     }
 
+    private static string RejectionJson(string correlationId, string reason) =>
+        JsonSerializer.Serialize(new
+        {
+            type = "tools/result",
+            correlationId,
+            success = false,
+            rejectReason = reason,
+            payload = (string?)null
+        });
+
+    /// <summary>
+    /// Strict message parse. Exactly two message types exist ("tools/call", which is also the
+    /// default when "type" is absent, and "elicitation/reply"); anything else is malformed rather
+    /// than being guessed at. Throws on any structural problem.
+    /// </summary>
+    internal static (ToolCallRequest? request, ElicitationReply? reply) ParseMessage(string frame, string callerSid)
+    {
+        using var doc = JsonDocument.Parse(frame);
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("Message is not a JSON object.");
+
+        var kind = "tools/call";
+        if (root.TryGetProperty("type", out var t))
+        {
+            if (t.ValueKind != JsonValueKind.String)
+                throw new InvalidDataException("Message type is not a string.");
+            kind = t.GetString()!;
+        }
+
+        return kind switch
+        {
+            "elicitation/reply" => (null, ParseElicitationReply(root, callerSid)),
+            "tools/call" => (ParseToolCall(root), null),
+            _ => throw new InvalidDataException("Unknown message type.")
+        };
+    }
+
+    private static string OptionalString(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var e)) return string.Empty;
+        return e.ValueKind == JsonValueKind.String
+            ? e.GetString() ?? string.Empty
+            : throw new InvalidDataException($"'{name}' is not a string.");
+    }
+
     private static ElicitationReply ParseElicitationReply(JsonElement root, string callerSid)
     {
-        var correlationId = root.TryGetProperty("correlationId", out var c) ? c.GetString() ?? "" : "";
-        var paramHash = root.TryGetProperty("paramHash", out var h) ? h.GetString() ?? "" : "";
-        var approved = root.TryGetProperty("approved", out var a) && a.GetBoolean();
-        var toolId = root.TryGetProperty("toolId", out var t) ? t.GetString() ?? "" : "";
+        var correlationId = OptionalString(root, "correlationId");
+        var paramHash = OptionalString(root, "paramHash");
+        var toolId = OptionalString(root, "toolId");
+
+        // Only the JSON literal true approves. "true", 1, null and every other shape are not approval.
+        var approved = root.TryGetProperty("approved", out var a) && a.ValueKind == JsonValueKind.True;
 
         // SECURITY: the approver identity on this path MUST be the connection's own
         // OS-impersonated callerSid, captured via RunAsClient at connect time — never a
@@ -485,20 +751,50 @@ public sealed class NamedPipeServer
         return new ElicitationReply(correlationId, paramHash, approved, callerSid, toolId);
     }
 
+    // Same shape the manifest schema requires of a toolId. Anything else cannot name a tool, and an
+    // arbitrary string must not reach audit events or log lines.
+    private static readonly System.Text.RegularExpressions.Regex ToolIdSyntax =
+        new(@"^[a-z0-9]+(-[a-z0-9]+)*\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     private static ToolCallRequest ParseToolCall(JsonElement root)
     {
-        var toolId = root.GetProperty("toolId").GetString()
-            ?? throw new InvalidDataException("tools/call missing toolId.");
+        if (!root.TryGetProperty("toolId", out var id) || id.ValueKind != JsonValueKind.String)
+            throw new InvalidDataException("tools/call missing toolId.");
 
-        var parameters = new Dictionary<string, string>();
-        if (root.TryGetProperty("parameters", out var p) && p.ValueKind == JsonValueKind.Object)
+        var toolId = id.GetString() ?? string.Empty;
+        if (toolId.Length is 0 or > 100 || !ToolIdSyntax.IsMatch(toolId))
+            throw new InvalidDataException("tools/call toolId is not a valid tool identifier.");
+
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (root.TryGetProperty("parameters", out var p) && p.ValueKind != JsonValueKind.Null)
         {
+            if (p.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("'parameters' is not an object.");
+
             foreach (var prop in p.EnumerateObject())
-                parameters[prop.Name] = prop.Value.ToString();
+            {
+                // Two values for one name would let different components pick different winners.
+                if (!parameters.TryAdd(prop.Name, ToWireString(prop.Value)))
+                    throw new InvalidDataException("Duplicate parameter name.");
+            }
         }
 
         return new ToolCallRequest { ToolId = toolId, Parameters = parameters };
     }
+
+    /// <summary>
+    /// Canonical wire text for a scalar. JSON true/false become "true"/"false" (not "True"/"False"),
+    /// numbers keep their exact text (so an integer parameter can reject "1.5" or "1e1"), and
+    /// objects, arrays and null are never valid parameter values.
+    /// </summary>
+    private static string ToWireString(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()!,
+        JsonValueKind.Number => value.GetRawText(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        _ => throw new InvalidDataException("Parameter values must be strings, numbers or booleans.")
+    };
 }
 
 /// <summary>
@@ -513,6 +809,7 @@ public sealed class ApprovalPipeServer
     private readonly ElicitationRouter _router;
     private readonly IConfiguration _config;
     private readonly ILogger<ApprovalPipeServer> _logger;
+    private readonly HashSet<string> _approverSids;
 
     public ApprovalPipeServer(
         PipeSecurityFactory securityFactory, ElicitationRouter router,
@@ -522,14 +819,20 @@ public sealed class ApprovalPipeServer
         _router = router;
         _config = config;
         _logger = logger;
+        _approverSids = new HashSet<string>(
+            config.GetSection("Elicitation:ApproverSids").Get<string[]>() ?? Array.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     private string PipeName => _config["Elicitation:ApprovalPipeName"] ?? "McpBroker.Approvals";
-    private int MaxInstances => int.TryParse(_config["Elicitation:ApprovalPipeInstances"], out var n) ? n : 4;
+    private int MaxInstances => ConfigReader.Int(_config, "Elicitation:ApprovalPipeInstances", 4, 1, 254);
+
+    internal void ValidateConfiguration() => _ = MaxInstances;
 
     public async Task RunAsync(CancellationToken ct)
     {
-        var sids = _config.GetSection("Elicitation:ApproverSids").Get<string[]>() ?? Array.Empty<string>();
+        ValidateConfiguration();
+        var sids = _approverSids.ToArray();
         if (sids.Length == 0)
         {
             _logger.LogError("Elicitation:ApproverSids is empty; approval pipe not started (distinct-approver calls will fail closed)");
@@ -565,9 +868,20 @@ public sealed class ApprovalPipeServer
             try
             {
                 await stream.WaitForConnectionAsync(ct);
-                var approverSid = CaptureSid(stream);
+
+                string approverSid;
+                try
+                {
+                    approverSid = NamedPipeServer.RequireCallerSid(CaptureSid(stream));
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "Approval slot {Slot}: approver identity could not be established; connection refused", slot);
+                    continue;
+                }
+
                 _logger.LogInformation("Approval slot {Slot}: approver connected SID={Sid}", slot, approverSid);
-                await ServeApproverAsync(stream, approverSid, ct);
+                await ServeApproverAsync(stream, () => stream.IsConnected, approverSid, ct);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -588,8 +902,14 @@ public sealed class ApprovalPipeServer
         return sid;
     }
 
-    private async Task ServeApproverAsync(NamedPipeServerStream stream, string approverSid, CancellationToken ct)
+    internal async Task ServeApproverAsync(Stream stream, Func<bool> isConnected, string approverSid, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(approverSid))
+        {
+            _logger.LogWarning("Approver connection without an identity refused");
+            return;
+        }
+
         var writeLock = new SemaphoreSlim(1, 1);
 
         async Task Notify(PendingElicitation pe)
@@ -601,6 +921,9 @@ public sealed class ApprovalPipeServer
                 toolId = pe.ToolId,
                 callerSid = pe.CallerSid,
                 paramHash = pe.ParamHash,
+                // What the approver is actually being asked to authorize. These are the validated
+                // parameters, the same ones that were hashed and that will be executed.
+                parameters = pe.Parameters ?? new Dictionary<string, string>(),
                 expiresUtc = pe.ExpiresUtc
             });
             await writeLock.WaitAsync(ct);
@@ -613,7 +936,7 @@ public sealed class ApprovalPipeServer
 
         try
         {
-            while (!ct.IsCancellationRequested && stream.IsConnected)
+            while (!ct.IsCancellationRequested && isConnected())
             {
                 string? frame;
                 try
@@ -629,23 +952,58 @@ public sealed class ApprovalPipeServer
 
                 if (frame is null) break;
 
-                using var doc = JsonDocument.Parse(frame);
-                var root = doc.RootElement;
-                var correlationId = root.TryGetProperty("correlationId", out var c) ? c.GetString() ?? "" : "";
-                var paramHash = root.TryGetProperty("paramHash", out var h) ? h.GetString() ?? "" : "";
-                var approved = root.TryGetProperty("approved", out var a) && a.GetBoolean();
+                string correlationId, paramHash, toolId;
+                bool approved;
+                try
+                {
+                    using var doc = JsonDocument.Parse(frame);
+                    var root = doc.RootElement;
+                    if (root.ValueKind != JsonValueKind.Object)
+                        throw new InvalidDataException("Approval message is not a JSON object.");
+
+                    correlationId = ApprovalString(root, "correlationId");
+                    paramHash = ApprovalString(root, "paramHash");
+                    toolId = ApprovalString(root, "toolId");
+
+                    // Only a literal true or false is a decision; any other shape is not an answer.
+                    if (!root.TryGetProperty("approved", out var a) ||
+                        (a.ValueKind != JsonValueKind.True && a.ValueKind != JsonValueKind.False))
+                        throw new InvalidDataException("'approved' must be a JSON boolean.");
+                    approved = a.ValueKind == JsonValueKind.True;
+                }
+                catch (Exception ex) when (ex is JsonException or InvalidDataException)
+                {
+                    _logger.LogWarning(ex, "Malformed approver message, closing session SID={Sid}", approverSid);
+                    break;
+                }
+
+                // Defense in depth behind the pipe ACL: the ACL also admits the service's own
+                // identity, which is not an approver. A reply from any SID outside the approver
+                // list is ignored and must not consume the pending request.
+                if (!_approverSids.Contains(approverSid))
+                {
+                    _logger.LogWarning("Reply from SID {Sid} ignored: not an authorized approver", approverSid);
+                    continue;
+                }
 
                 // Approver identity is the pipe's caller SID — not client-supplied — so the
                 // separation-of-duties check in ConsentEngine cannot be forged by the caller.
-                var toolId = root.TryGetProperty("toolId", out var tool) ? tool.GetString() ?? "" : "";
                 var reply = new ElicitationReply(correlationId, paramHash, approved, approverSid, toolId);
                 if (!_router.TryResolve(correlationId, reply))
-                    _logger.LogDebug("Approval for {Corr} had no pending request (expired?)", correlationId);
+                    _logger.LogDebug("Approval for {Corr} had no matching pending request (expired or mismatched?)", correlationId);
             }
         }
         finally
         {
             writeLock.Dispose();
         }
+    }
+
+    private static string ApprovalString(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var e)) return string.Empty;
+        return e.ValueKind == JsonValueKind.String
+            ? e.GetString() ?? string.Empty
+            : throw new InvalidDataException($"'{name}' is not a string.");
     }
 }

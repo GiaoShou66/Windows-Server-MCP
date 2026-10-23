@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Broker.Core;
 using Broker.Registry;
@@ -21,14 +22,88 @@ public sealed class JeaConfigGenerator
 
     public JeaConfigGenerator(string outputDir) => _outputDir = outputDir;
 
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
+
+    private static System.Text.RegularExpressions.Regex Identifier(string pattern) =>
+        new(pattern, System.Text.RegularExpressions.RegexOptions.CultureInvariant, RegexTimeout);
+
+    // These strings are interpolated into PowerShell data files that decide which cmdlets JEA exposes
+    // (and, for RoleCapabilityName, into a file name). They must be plain identifiers.
+    private static readonly System.Text.RegularExpressions.Regex CmdletName = Identifier(@"^[A-Za-z][A-Za-z0-9]*-[A-Za-z][A-Za-z0-9]*\z");
+    private static readonly System.Text.RegularExpressions.Regex ModuleName = Identifier(@"^[A-Za-z0-9][A-Za-z0-9._-]*\z");
+    private static readonly System.Text.RegularExpressions.Regex RoleCapability = Identifier(@"^[A-Za-z][A-Za-z0-9]*\z");
+    private static readonly System.Text.RegularExpressions.Regex EndpointId = Identifier(@"^[A-Za-z0-9][A-Za-z0-9._-]*\z");
+    private static readonly System.Text.RegularExpressions.Regex Principal = Identifier(@"^([A-Za-z0-9._ -]+\\)?[A-Za-z0-9._ $-]+\z");
+    private static readonly System.Text.RegularExpressions.Regex GmsaName = Identifier(@"^([A-Za-z0-9._-]+\\)?[A-Za-z0-9._-]+\$?\z");
+    private static readonly System.Text.RegularExpressions.Regex ExeName = Identifier(@"^[A-Za-z0-9][A-Za-z0-9._-]*\.exe\z");
+    private static readonly System.Text.RegularExpressions.Regex ParameterId = Identifier(@"^[A-Za-z][A-Za-z0-9]*\z");
+
+    /// <summary>
+    /// Refuses any manifest value that is not a plain identifier. The message names the tool and the
+    /// field but never repeats the value.
+    /// </summary>
+    internal static void ValidateIdentifiers(ToolManifest tool)
+    {
+        static void Check(ToolManifest t, string field, string? value, System.Text.RegularExpressions.Regex rx)
+        {
+            if (value is null || !rx.IsMatch(value))
+                throw new InvalidOperationException($"Tool {t.ToolId}: jeaMapping value '{field}' is missing or is not a plain identifier.");
+        }
+
+        var m = tool.JeaMapping;
+        Check(tool, "cmdlet", m.Cmdlet, CmdletName);
+        Check(tool, "moduleName", m.ModuleName, ModuleName);
+        Check(tool, "roleCapabilityName", m.RoleCapabilityName, RoleCapability);
+        Check(tool, "endpointName", m.EndpointName, EndpointId);
+        Check(tool, "accessGroup", m.AccessGroup, Principal);
+
+        if (m.UseGmsa) Check(tool, "gmsaAccount", m.GmsaAccount, GmsaName);
+        foreach (var g in m.VirtualAccountGroups ?? new()) Check(tool, "virtualAccountGroups", g, Principal);
+        foreach (var c in m.ExternalCommands ?? new()) Check(tool, "externalCommands", c, ExeName);
+
+        foreach (var p in tool.Parameters)
+        {
+            Check(tool, "parameter name", p.Name, ParameterId);
+            if (p.Allowlist.Range is { } r &&
+                (!double.IsFinite(r.Min) || !double.IsFinite(r.Max) || r.Min > r.Max))
+                throw new InvalidOperationException($"Tool {tool.ToolId}: parameter '{p.Name}' has an invalid range.");
+        }
+    }
+
     /// <summary>Emits one .psrc per tool and one .pssc per distinct endpoint.</summary>
     public IReadOnlyList<string> GenerateAll(IEnumerable<ToolManifest> tools)
     {
+        // Validate everything before touching the disk: one bad tool stops the whole run.
+        var all = tools.ToList();
+        foreach (var tool in all) ValidateIdentifiers(tool);
+
+        // register-jea.ps1 registers every .psrc/.pssc in the directory. A file left over from a tool
+        // that was removed or renamed would be registered too, granting something the current manifest
+        // no longer defines. Refuse rather than delete: the operator decides what happens to it.
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tool in all)
+        {
+            expected.Add($"{tool.JeaMapping.RoleCapabilityName}.psrc");
+            expected.Add($"{tool.JeaMapping.EndpointName}.pssc");
+        }
+        if (Directory.Exists(_outputDir))
+        {
+            var stray = Directory.EnumerateFiles(_outputDir)
+                .Select(Path.GetFileName)
+                .Where(n => n is not null && (n.EndsWith(".psrc", StringComparison.OrdinalIgnoreCase) ||
+                                              n.EndsWith(".pssc", StringComparison.OrdinalIgnoreCase)) && !expected.Contains(n))
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+            if (stray.Count > 0)
+                throw new InvalidOperationException(
+                    $"Output directory contains generated file(s) that are not part of this manifest: {string.Join(", ", stray)}. " +
+                    "Remove them or use an empty directory; they would otherwise be registered with the others.");
+        }
+
         Directory.CreateDirectory(_outputDir);
         var written = new List<string>();
         var byEndpoint = new Dictionary<string, List<ToolManifest>>(StringComparer.Ordinal);
 
-        foreach (var tool in tools)
+        foreach (var tool in all)
         {
             var psrcPath = Path.Combine(_outputDir, $"{tool.JeaMapping.RoleCapabilityName}.psrc");
             File.WriteAllText(psrcPath, BuildPsrc(tool));
@@ -97,7 +172,7 @@ public sealed class JeaConfigGenerator
         if (a.RegexPattern is { } pattern)
             return $"@{{ Name = '{p.Name}'; ValidatePattern = '{Escape(pattern)}' }}";
         if (a.Range is { } range)
-            return $"@{{ Name = '{p.Name}'; ValidateRange = {range.Min},{range.Max} }}";
+            return $"@{{ Name = '{p.Name}'; ValidateRange = {range.Min.ToString("R", CultureInfo.InvariantCulture)},{range.Max.ToString("R", CultureInfo.InvariantCulture)} }}";
 
         // maxLength-only: no native JEA equivalent, enforced broker-side by ParameterValidator
         return $"@{{ Name = '{p.Name}' }}";

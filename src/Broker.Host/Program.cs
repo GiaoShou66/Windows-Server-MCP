@@ -56,7 +56,7 @@ builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
     var path = cfg["Manifest:Path"] ?? "policy/manifest.json";
-    bool requireIntegrity = !bool.TryParse(cfg["Manifest:RequireIntegrity"], out var configured) || configured;
+    bool requireIntegrity = ConfigReader.Bool(cfg, "Manifest:RequireIntegrity", true);
     return new ManifestStore(path, sp.GetRequiredService<ILogger<ManifestStore>>(), requireIntegrity, cfg["Manifest:IntegrityPath"]);
 });
 builder.Services.AddSingleton<SignatureVerifier>();
@@ -66,18 +66,24 @@ builder.Services.AddSingleton<ISignatureVerifier>(sp => sp.GetRequiredService<Si
 builder.Services.AddSingleton<ParameterValidator>();
 builder.Services.AddSingleton<UntrustedSourceGate>();
 builder.Services.AddSingleton<ArgvBuilder>();
-builder.Services.AddSingleton<AmsiScanner>();
 builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-    bool requireDistinct = bool.TryParse(cfg["Elicitation:RequireDistinctApprover"], out var r) && r;
+    // Absent key keeps the documented default; a present-but-unrecognized value stops startup.
+    var mode = cfg["Amsi:Mode"] is { } raw ? AmsiOptions.ParseMode(raw) : AmsiMode.BestEffort;
+    return new AmsiScanner(sp.GetRequiredService<ILogger<AmsiScanner>>(), mode);
+});
+builder.Services.AddSingleton(sp =>
+{
+    var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    bool requireDistinct = ConfigReader.Bool(cfg, "Elicitation:RequireDistinctApprover", false);
     var approvers = cfg.GetSection("Elicitation:ApproverSids").Get<string[]>() ?? Array.Empty<string>();
     return new ConsentEngine(requireDistinct, approvers);
 });
 builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-    int window = int.TryParse(cfg["Taint:WindowSeconds"], out var w) ? w : 300;
+    int window = ConfigReader.Int(cfg, "Taint:WindowSeconds", 300);
     return new TaintTracker(window);
 });
 builder.Services.AddSingleton(sp =>
@@ -89,13 +95,40 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp =>
 {
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
-    int perMin = int.TryParse(cfg["RateLimit:CallsPerMinute"], out var a) ? a : 60;
-    int destPerHour = int.TryParse(cfg["RateLimit:DestructivePerHour"], out var b) ? b : 10;
-    return new RateLimiter(perMin, destPerHour);
+    return new RateLimiter(
+        ConfigReader.Int(cfg, "RateLimit:CallsPerMinute", 60),
+        ConfigReader.Int(cfg, "RateLimit:DestructivePerHour", 10, 0),
+        ConfigReader.Int(cfg, "RateLimit:GlobalCallsPerMinute", 600, 0));
 });
 
-// JEA
-builder.Services.AddSingleton<JeaEndpointClient>();
+// JEA: the pipeline only ever sees IJeaExecutor, bounded by global/endpoint/tool limits.
+builder.Services.AddSingleton(sp =>
+{
+    var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    var defaults = new JeaClientOptions();
+    return new JeaEndpointClient(
+        sp.GetRequiredService<ILogger<JeaEndpointClient>>(),
+        new JeaClientOptions(
+            ConfigReader.Int(cfg, "Jea:OpenTimeoutMs", defaults.OpenTimeoutMs),
+            ConfigReader.Int(cfg, "Jea:OperationTimeoutMs", defaults.OperationTimeoutMs)));
+});
+builder.Services.AddSingleton<IJeaExecutor>(sp =>
+{
+    var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+    var d = new JeaExecutionLimits();
+    var limits = new JeaExecutionLimits
+    {
+        MaxConcurrentTotal = ConfigReader.Int(cfg, "Jea:Limits:MaxConcurrentTotal", d.MaxConcurrentTotal, 1),
+        MaxConcurrentPerEndpoint = ConfigReader.Int(cfg, "Jea:Limits:MaxConcurrentPerEndpoint", d.MaxConcurrentPerEndpoint, 1),
+        MaxConcurrentPerTool = ConfigReader.Int(cfg, "Jea:Limits:MaxConcurrentPerTool", d.MaxConcurrentPerTool, 1),
+        MaxQueueLength = ConfigReader.Int(cfg, "Jea:Limits:MaxQueueLength", d.MaxQueueLength, 0),
+        QueueWaitTimeout = TimeSpan.FromSeconds(ConfigReader.Int(cfg, "Jea:Limits:QueueWaitSeconds", (int)d.QueueWaitTimeout.TotalSeconds)),
+        ExecutionTimeout = TimeSpan.FromSeconds(ConfigReader.Int(cfg, "Jea:Limits:ExecutionTimeoutSeconds", (int)d.ExecutionTimeout.TotalSeconds)),
+        MaxResponseBytes = ConfigReader.Int(cfg, "Jea:Limits:MaxResponseBytes", d.MaxResponseBytes, 1)
+    };
+    return new BoundedJeaExecutor(
+        sp.GetRequiredService<JeaEndpointClient>(), limits, sp.GetRequiredService<ILogger<BoundedJeaExecutor>>());
+});
 
 // Audit
 builder.Services.AddSingleton(sp =>
@@ -113,6 +146,16 @@ builder.Services.AddSingleton<NamedPipeServer>();
 builder.Services.AddSingleton<ApprovalPipeServer>();
 builder.Services.AddHostedService<Worker>();
 
-var host = builder.Build();
-host.Run();
-return 0;
+try
+{
+    var host = builder.Build();
+    host.Run();
+}
+catch (InvalidOperationException ex) when (ex.Message.StartsWith("Configuration value", StringComparison.Ordinal))
+{
+    // A bad setting is an operator error: say which key and exit non-zero, without a crash dump.
+    Console.Error.WriteLine($"Startup refused: {ex.Message}");
+    return 1;
+}
+
+return Environment.ExitCode;

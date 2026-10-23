@@ -39,6 +39,9 @@ public sealed class Worker : BackgroundService
         if (!RunStartupSelfCheck())
         {
             _logger.LogCritical("Startup self-check failed; refusing to open pipe listener");
+            // Non-zero so a service manager sees a failed start (recovery actions, alerting),
+            // not a clean stop.
+            Environment.ExitCode = 1;
             _lifetime.StopApplication();
             return;
         }
@@ -47,7 +50,7 @@ public sealed class Worker : BackgroundService
 
         var servers = new List<Task> { _pipeServer.RunAsync(stoppingToken) };
 
-        if (bool.TryParse(_config["Elicitation:RequireDistinctApprover"], out var distinct) && distinct)
+        if (ConfigReader.Bool(_config, "Elicitation:RequireDistinctApprover", false))
         {
             _logger.LogInformation("Distinct-approver mode on; starting approval pipe listener");
             servers.Add(_approvalServer.RunAsync(stoppingToken));

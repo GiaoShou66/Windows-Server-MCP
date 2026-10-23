@@ -8,12 +8,18 @@ Set-StrictMode -Version Latest
   Reversible — flips a boolean state on an existing task, never creates/deletes one.
   TaskPath/TaskName are ValidatePattern-constrained in the generated .psrc. This is a
   write-tier tool: the broker requires human elicitation approval before this runs.
+
+  TaskPath is the Task Scheduler folder in the form Get-ScheduledTask -TaskPath expects:
+  a leading and trailing backslash, with a lone backslash naming the root folder. Segments
+  are non-empty and may not consist only of dots (no "." or ".." traversal-like segments);
+  wildcards are excluded so one call can never address several folders. The pattern ends
+  with \z rather than $ because $ also matches just before a trailing newline.
 #>
 function Set-BrokerScheduledTaskState {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidatePattern('^\\[\\A-Za-z0-9 _.-]*\\$')]
+        [ValidatePattern('^\\(?:(?!\.+\\)[A-Za-z0-9 _.-]+\\)*\z')]
         [string] $TaskPath,
 
         [Parameter(Mandatory = $true)]

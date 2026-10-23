@@ -17,6 +17,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Broker.Audit", "src\Broker.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Broker.Host", "src\Broker.Host\Broker.Host.csproj", "{A1000001-0000-0000-0000-000000000007}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{DBF5C983-DF3A-4672-ADC0-E714E0909225}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Broker.Tests", "test\Broker.Tests\Broker.Tests.csproj", "{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -111,10 +115,23 @@ Global
 		{A1000001-0000-0000-0000-000000000007}.Release|x64.Build.0 = Release|Any CPU
 		{A1000001-0000-0000-0000-000000000007}.Release|x86.ActiveCfg = Release|Any CPU
 		{A1000001-0000-0000-0000-000000000007}.Release|x86.Build.0 = Release|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Debug|x64.Build.0 = Debug|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Debug|x86.Build.0 = Debug|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Release|x64.ActiveCfg = Release|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Release|x64.Build.0 = Release|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Release|x86.ActiveCfg = Release|Any CPU
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{9E450A60-C1CC-495F-8216-DBF20CAD4F4A} = {DBF5C983-DF3A-4672-ADC0-E714E0909225}
 	EndGlobalSection
 EndGlobal

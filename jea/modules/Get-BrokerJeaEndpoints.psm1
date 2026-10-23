@@ -6,7 +6,9 @@ Set-StrictMode -Version Latest
   Read-only: list registered JEA session configurations on this host.
 .NOTES
   Exposed through the McpBroker.ReadLocal JEA endpoint as the only visible cmdlet.
-  Returns a projected, non-sensitive view (name, run-as identity kind, language mode).
+  Returns a projected view: Name, RunAsUser, Permission and LanguageMode. RunAsUser and
+  Permission name security principals (who may call each endpoint and as whom it runs), so the
+  output is internal security configuration, not public metadata.
 #>
 function Get-BrokerJeaEndpoints {
     [CmdletBinding()]

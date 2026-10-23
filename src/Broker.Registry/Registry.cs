@@ -6,6 +6,8 @@ using System.Text.Json.Serialization;
 using Broker.Core;
 using Microsoft.Extensions.Logging;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Broker.Tests")]
+
 namespace Broker.Registry;
 
 // ---- Manifest POCOs (mirror policy/tool-manifest.schema.json) ----
@@ -70,16 +72,28 @@ public sealed class ToolManifest
     [JsonPropertyName("revoked")] public bool Revoked { get; set; }
 
     [JsonIgnore]
-    public RiskTier RiskTier => RiskTierRaw.ToLowerInvariant() switch
+    public bool HasRecognizedRiskTier => RiskTierRaw?.ToLowerInvariant() is "read" or "write" or "destructive";
+
+    /// <summary>
+    /// An unrecognized tier string maps to the MOST restrictive tier, never to Read: a typo or a
+    /// tampered value must not quietly downgrade a mutating tool to unattended read treatment.
+    /// (ManifestStore also refuses to register such a tool at all.)
+    /// </summary>
+    [JsonIgnore]
+    public RiskTier RiskTier => RiskTierRaw?.ToLowerInvariant() switch
     {
+        "read" => Core.RiskTier.Read,
         "write" => Core.RiskTier.Write,
-        "destructive" => Core.RiskTier.Destructive,
-        _ => Core.RiskTier.Read
+        _ => Core.RiskTier.Destructive
     };
 
+    /// <summary>
+    /// Write and destructive tools ALWAYS require elicitation; `requiresElicitation: false`
+    /// cannot switch approval off. The flag can only add approval to a read tool.
+    /// </summary>
     [JsonIgnore]
     public bool ElicitationRequired =>
-        RequiresElicitation ?? RiskTier is Core.RiskTier.Write or Core.RiskTier.Destructive;
+        RiskTier is Core.RiskTier.Write or Core.RiskTier.Destructive || RequiresElicitation == true;
 }
 
 public sealed class ManifestFile
@@ -98,8 +112,12 @@ public sealed class WorkflowPolicies
 }
 
 /// <summary>
-/// Loads and hot-reloads the local tool registry. Revocation is fast (file watch,
-/// no restart); adding a tool is deliberate (restart required) — asymmetry is intentional.
+/// Loads and hot-reloads the local tool registry. The asymmetry is enforced, not just
+/// intended: a hot reload can only NARROW the registry (revoke a tool by removing it or
+/// setting "revoked": true). It can never add a tool, change a tool's risk tier, loosen a
+/// parameter allowlist, or alter any other definition; those edits take effect only after a
+/// restart, so the authorization state cannot be widened or half-applied while running.
+/// A failed integrity check on reload revokes every tool (fail closed).
 /// </summary>
 public sealed class ManifestStore : IDisposable
 {
@@ -133,6 +151,10 @@ public sealed class ManifestStore : IDisposable
         _watcher = new FileSystemWatcher(dir, file) { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName };
         _watcher.Changed += (_, _) => Reload();
         _watcher.Created += (_, _) => Reload();
+        // Publishing by writing a temp file and renaming it over the manifest (the usual atomic
+        // deployment) raises Renamed, not Changed or Created; without this a revocation delivered
+        // that way would silently never take effect.
+        _watcher.Renamed += (_, _) => Reload();
         _watcher.EnableRaisingEvents = true;
     }
 
@@ -146,26 +168,57 @@ public sealed class ManifestStore : IDisposable
         lock (_lock) return _tools.TryGetValue(toolId, out var m) && !m.Revoked ? m : null;
     }
 
+    /// <summary>Initial load at startup: the file's validated contents become the registry.</summary>
     private void Load()
+    {
+        var loaded = LoadCandidate();
+        lock (_lock) _tools = loaded;
+        _logger.LogInformation("Loaded {Count} tools from manifest", loaded.Count);
+    }
+
+    /// <summary>
+    /// Reads and validates the manifest. Missing file or failed integrity check yields an EMPTY
+    /// set (fail closed). A tool with a blank id or an unrecognized risk tier is excluded and
+    /// logged, never defaulted to a permissive tier. Unparseable JSON and duplicate tool ids
+    /// throw, so a corrupt file can never be mistaken for a smaller valid one.
+    /// </summary>
+    private Dictionary<string, ToolManifest> LoadCandidate()
     {
         if (!File.Exists(_path))
         {
             _logger.LogWarning("Manifest not found at {Path}; registry is empty", _path);
-            lock (_lock) _tools = new();
-            return;
+            return new();
         }
 
         if (_requireIntegrity && !VerifyIntegrity())
         {
             _logger.LogError("Manifest integrity verification failed for {Path}", _path);
-            lock (_lock) _tools = new();
-            return;
+            return new();
         }
 
         var json = File.ReadAllText(_path);
         var parsed = JsonSerializer.Deserialize<ManifestFile>(json, JsonOpts) ?? new ManifestFile();
-        lock (_lock) _tools = parsed.Tools.ToDictionary(t => t.ToolId, StringComparer.Ordinal);
-        _logger.LogInformation("Loaded {Count} tools from manifest", _tools.Count);
+
+        var result = new Dictionary<string, ToolManifest>(StringComparer.Ordinal);
+        foreach (var tool in parsed.Tools)
+        {
+            if (string.IsNullOrWhiteSpace(tool.ToolId))
+            {
+                _logger.LogError("Manifest entry without a toolId was excluded");
+                continue;
+            }
+
+            if (!tool.HasRecognizedRiskTier)
+            {
+                _logger.LogError("Tool {Tool} has an unrecognized riskTier and was excluded", tool.ToolId);
+                continue;
+            }
+
+            if (!result.TryAdd(tool.ToolId, tool))
+                throw new InvalidDataException($"Duplicate toolId '{tool.ToolId}' in manifest.");
+        }
+
+        return result;
     }
 
     private bool VerifyIntegrity()
@@ -183,39 +236,73 @@ public sealed class ManifestStore : IDisposable
 
     // FileSystemWatcher can deliver Changed/Created on multiple threadpool threads concurrently.
     // Without serializing here, two overlapping saves could each snapshot a stale "before" set
-    // and race on Load(), producing an incorrect ToolsRevoked diff — on the exact path meant to
-    // be the fast security kill-switch. The lock makes rapid-fire edits process strictly in order.
+    // and race on the swap, producing an incorrect ToolsRevoked diff — on the exact path meant
+    // to be the fast security kill-switch. The lock makes rapid-fire edits process strictly in order.
     private void Reload()
     {
         lock (_reloadLock)
         {
-        try
-        {
-            var before = new HashSet<string>(ActiveToolIds());
-            // small debounce; editors write in bursts
-            Thread.Sleep(150);
-            Load();
-            var after = new HashSet<string>(ActiveToolIds());
-
-            before.ExceptWith(after);
-            if (before.Count > 0)
+            try
             {
-                _logger.LogWarning("Tools revoked on reload: {Tools}", string.Join(", ", before));
-                ToolsRevoked?.Invoke(before);
+                // small debounce; editors write in bursts
+                Thread.Sleep(150);
+                ApplyReload();
+            }
+            catch (Exception ex)
+            {
+                // fail closed: on parse error keep the last good set, do not widen access
+                _logger.LogError(ex, "Manifest reload failed; keeping previous registry");
             }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>Applies a reload immediately. Exceptions propagate (the watcher path logs them).</summary>
+    internal void ReloadNow()
+    {
+        lock (_reloadLock) ApplyReload();
+    }
+
+    private void ApplyReload()
+    {
+        var candidate = LoadCandidate();
+
+        Dictionary<string, ToolManifest> previous;
+        lock (_lock)
+            previous = _tools.Where(kv => !kv.Value.Revoked).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+        var next = new Dictionary<string, ToolManifest>(StringComparer.Ordinal);
+        var revoked = new List<string>();
+
+        foreach (var (id, current) in previous)
         {
-            // fail closed: on parse error keep the last good set, do not widen access
-            _logger.LogError(ex, "Manifest reload failed; keeping previous registry");
+            if (!candidate.TryGetValue(id, out var proposed) || proposed.Revoked)
+            {
+                revoked.Add(id);
+                continue;
+            }
+
+            if (!SameDefinition(current, proposed))
+                _logger.LogWarning(
+                    "Manifest change to tool {Tool} is ignored until the broker restarts; hot reload can only revoke", id);
+
+            next[id] = current;
         }
+
+        foreach (var (id, proposed) in candidate)
+            if (!previous.ContainsKey(id) && !proposed.Revoked)
+                _logger.LogWarning("Tool {Tool} was added to the manifest; it is not enabled until the broker restarts", id);
+
+        lock (_lock) _tools = next;
+
+        if (revoked.Count > 0)
+        {
+            _logger.LogWarning("Tools revoked on reload: {Tools}", string.Join(", ", revoked));
+            ToolsRevoked?.Invoke(revoked);
         }
     }
 
-    private IEnumerable<string> ActiveToolIds()
-    {
-        lock (_lock) return _tools.Values.Where(t => !t.Revoked).Select(t => t.ToolId).ToArray();
-    }
+    private static bool SameDefinition(ToolManifest a, ToolManifest b) =>
+        string.Equals(JsonSerializer.Serialize(a), JsonSerializer.Serialize(b), StringComparison.Ordinal);
 
     public void Dispose() => _watcher.Dispose();
 }
