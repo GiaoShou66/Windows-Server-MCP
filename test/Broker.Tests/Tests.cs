@@ -173,7 +173,7 @@ public class ConsentEngineTests
     {
         var c = new ConsentEngine(requireDistinctApprover: true, approverSids: new[] { "approver" });
         var h = ConsentEngine.HashParameters(new Dictionary<string, string> { ["a"] = "1" });
-        var d = c.Verify("corr", h, "caller", "corr", h, approved: true, decidedBySid: "approver");
+        var d = c.Verify("corr", h, "caller", "corr", h, approved: true, decidedBySid: "approver", expectedToolId: "t", replyToolId: "t");
         Assert.True(d.Allowed);
     }
 
@@ -182,7 +182,7 @@ public class ConsentEngineTests
     {
         var c = new ConsentEngine();
         var h = ConsentEngine.HashParameters(new Dictionary<string, string> { ["a"] = "1" });
-        Assert.False(c.Verify("corr", h, "caller", "OTHER", h, true, "caller").Allowed);
+        Assert.False(c.Verify("corr", h, "caller", "OTHER", h, true, "caller", "t", "t").Allowed);
     }
 
     [Fact]
@@ -190,7 +190,7 @@ public class ConsentEngineTests
     {
         var c = new ConsentEngine();
         var h = ConsentEngine.HashParameters(new Dictionary<string, string> { ["a"] = "1" });
-        Assert.False(c.Verify("corr", h, "caller", "corr", "DEADBEEF", true, "caller").Allowed);
+        Assert.False(c.Verify("corr", h, "caller", "corr", "DEADBEEF", true, "caller", "t", "t").Allowed);
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public class ConsentEngineTests
     {
         var c = new ConsentEngine();
         var h = ConsentEngine.HashParameters(new Dictionary<string, string>());
-        Assert.False(c.Verify("corr", h, "caller", "corr", h, approved: false, "caller").Allowed);
+        Assert.False(c.Verify("corr", h, "caller", "corr", h, approved: false, "caller", "t", "t").Allowed);
     }
 
     [Fact]
@@ -206,7 +206,7 @@ public class ConsentEngineTests
     {
         var c = new ConsentEngine(requireDistinctApprover: true, approverSids: new[] { "approver" });
         var h = ConsentEngine.HashParameters(new Dictionary<string, string>());
-        var d = c.Verify("corr", h, "caller", "corr", h, true, decidedBySid: "caller");
+        var d = c.Verify("corr", h, "caller", "corr", h, true, decidedBySid: "caller", expectedToolId: "t", replyToolId: "t");
         Assert.False(d.Allowed);
         Assert.Equal("self-approval-forbidden", d.Reason);
     }
@@ -216,7 +216,7 @@ public class ConsentEngineTests
     {
         var c = new ConsentEngine(requireDistinctApprover: true, approverSids: new[] { "approver" });
         var h = ConsentEngine.HashParameters(new Dictionary<string, string>());
-        var d = c.Verify("corr", h, "caller", "corr", h, true, decidedBySid: "stranger");
+        var d = c.Verify("corr", h, "caller", "corr", h, true, decidedBySid: "stranger", expectedToolId: "t", replyToolId: "t");
         Assert.False(d.Allowed);
         Assert.Equal("approver-not-authorized", d.Reason);
     }
@@ -226,7 +226,7 @@ public class ConsentEngineTests
     {
         var c = new ConsentEngine(requireDistinctApprover: true, approverSids: new[] { "approver" });
         var h = ConsentEngine.HashParameters(new Dictionary<string, string>());
-        Assert.True(c.Verify("corr", h, "caller", "corr", h, true, decidedBySid: "approver").Allowed);
+        Assert.True(c.Verify("corr", h, "caller", "corr", h, true, decidedBySid: "approver", expectedToolId: "t", replyToolId: "t").Allowed);
     }
 }
 

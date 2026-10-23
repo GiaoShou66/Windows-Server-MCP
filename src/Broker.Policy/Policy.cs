@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,6 +9,69 @@ using Broker.Registry;
 using Microsoft.Extensions.Logging;
 
 namespace Broker.Policy;
+
+/// <summary>
+/// The single definition of what each manifest parameter type means. The validator and the
+/// argv builder both go through this class, so a value can never pass validation under one
+/// parser and then be converted by a different one. Parsing is culture-invariant, ASCII-only
+/// and canonical: no whitespace, no thousands separators, no exponent form for integers, no
+/// "+" sign, and booleans are exactly "true" or "false".
+/// </summary>
+public static class ParameterTypes
+{
+    public static bool IsSupported(string? type) => type is "string" or "enum" or "int" or "bool";
+
+    public static bool TryParseInt(string raw, out int value)
+    {
+        value = 0;
+        if (string.IsNullOrEmpty(raw) || raw.Length > 11) return false;
+
+        int i = raw[0] == '-' ? 1 : 0;
+        if (i == raw.Length) return false;
+        for (int j = i; j < raw.Length; j++)
+            if (raw[j] < '0' || raw[j] > '9') return false;
+
+        return int.TryParse(raw, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out value);
+    }
+
+    public static bool TryParseBool(string raw, out bool value)
+    {
+        switch (raw)
+        {
+            case "true": value = true; return true;
+            case "false": value = false; return true;
+            default: value = false; return false;
+        }
+    }
+
+    public static bool TryParseFiniteNumber(string raw, out double value)
+    {
+        const NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent;
+        return double.TryParse(raw, styles, CultureInfo.InvariantCulture, out value) && double.IsFinite(value);
+    }
+
+    /// <summary>Converts a raw wire value into the CLR value passed to PowerShell, or fails.</summary>
+    public static bool TryConvert(string? type, string raw, out object value)
+    {
+        value = raw;
+        switch (type)
+        {
+            case "string":
+            case "enum":
+                return true;
+            case "int":
+                if (!TryParseInt(raw, out var i)) return false;
+                value = i;
+                return true;
+            case "bool":
+                if (!TryParseBool(raw, out var b)) return false;
+                value = b;
+                return true;
+            default:
+                return false;
+        }
+    }
+}
 
 /// <summary>
 /// Validates caller parameters against the per-parameter allowlist in the manifest.
@@ -53,10 +117,19 @@ public sealed class ParameterValidator
         foreach (var ch in value)
             if (char.IsControl(ch)) return $"parameter-control-character:{p.Name}";
 
+        if (!ParameterTypes.IsSupported(p.Type)) return $"parameter-type-unsupported:{p.Name}";
+
         var a = p.Allowlist;
 
         if (a.MaxLength is { } max && value.Length > max)
             return $"parameter-too-long:{p.Name}";
+
+        // Type conformity uses the same parser the argv builder will use.
+        int intValue = 0;
+        if (p.Type == "int" && !ParameterTypes.TryParseInt(value, out intValue))
+            return $"parameter-not-integer:{p.Name}";
+        if (p.Type == "bool" && !ParameterTypes.TryParseBool(value, out _))
+            return $"parameter-not-boolean:{p.Name}";
 
         if (a.EnumValues is { Count: > 0 } set && !set.Contains(value, StringComparer.Ordinal))
             return $"parameter-not-in-enum:{p.Name}";
@@ -67,7 +140,9 @@ public sealed class ParameterValidator
 
         if (a.Range is { } range)
         {
-            if (!double.TryParse(value, out var num)) return $"parameter-not-numeric:{p.Name}";
+            double num;
+            if (p.Type == "int") num = intValue;
+            else if (!ParameterTypes.TryParseFiniteNumber(value, out num)) return $"parameter-not-numeric:{p.Name}";
             if (num < range.Min || num > range.Max) return $"parameter-out-of-range:{p.Name}";
         }
 
@@ -140,12 +215,19 @@ public sealed class RateLimiter
 
 /// <summary>
 /// Builds the argument set for a JEA cmdlet invocation as a typed dictionary — never a
-/// composed shell/command string. Refuses any parameter not backed by an allowlist entry.
+/// composed shell/command string. Refuses any parameter not backed by an allowlist entry and
+/// converts values with <see cref="ParameterTypes"/>, the same definitions the validator uses.
+/// Every refusal is an <see cref="InvalidOperationException"/> whose message never contains a
+/// caller-supplied value, so it is safe to log and cannot leak into a client response.
 /// </summary>
 public sealed class ArgvBuilder
 {
     public IReadOnlyDictionary<string, object> Build(ToolManifest tool, IReadOnlyDictionary<string, string> supplied)
     {
+        var known = tool.Parameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        if (supplied.Keys.Any(k => !known.Contains(k)))
+            throw new InvalidOperationException("Refusing to build call: a parameter not defined for the tool was supplied.");
+
         var argv = new Dictionary<string, object>(StringComparer.Ordinal);
 
         foreach (var p in tool.Parameters)
@@ -157,12 +239,11 @@ public sealed class ArgvBuilder
 
             if (!supplied.TryGetValue(p.Name, out var raw)) continue;
 
-            argv[p.Name] = p.Type switch
-            {
-                "int" => int.Parse(raw),
-                "bool" => bool.Parse(raw),
-                _ => raw
-            };
+            if (raw is null || !ParameterTypes.TryConvert(p.Type, raw, out var converted))
+                throw new InvalidOperationException(
+                    $"Refusing to build call: parameter {p.Name} is not a valid '{p.Type}'.");
+
+            argv[p.Name] = converted;
         }
 
         return argv;
@@ -286,7 +367,11 @@ public sealed class AmsiScanner : IDisposable
         IntPtr amsiContext, byte[] buffer, uint length, string contentName, IntPtr session, out int result);
 }
 
-/// <summary>Verifies single-use elicitation approvals: correct call, matching params, approved.</summary>
+/// <summary>
+/// Verifies single-use elicitation approvals. An approval is only valid for the exact
+/// operation it was requested for: the same server-generated correlation id, the same tool,
+/// and the same operation hash (tool + caller + parameters, so the target is covered).
+/// </summary>
 public sealed class ConsentEngine
 {
     private readonly bool _requireDistinctApprover;
@@ -305,22 +390,52 @@ public sealed class ConsentEngine
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 
+    /// <summary>
+    /// Hash of the whole operation being approved: tool, requesting caller and parameters
+    /// (which carry the target). Binding the tool and caller into the hash means a hash taken
+    /// for one tool or one requester can never match an operation of another, independent of
+    /// the separate tool-id comparison in <see cref="Verify"/>.
+    /// </summary>
+    public static string HashOperation(string toolId, string callerSid, IReadOnlyDictionary<string, string> parameters)
+    {
+        var canonical = JsonSerializer.Serialize(new
+        {
+            tool = toolId,
+            caller = callerSid,
+            parameters = parameters.OrderBy(k => k.Key, StringComparer.Ordinal).ToDictionary(k => k.Key, v => v.Value)
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    /// <summary>
+    /// Every argument is mandatory on purpose: there is no overload and no default that lets a
+    /// caller skip the tool-identity comparison. Any missing identity fails closed.
+    /// </summary>
     public PolicyDecision Verify(string correlationId, string expectedHash, string callerSid,
         string replyCorrelationId, string replyHash, bool approved, string decidedBySid,
-        string? expectedToolId = null, string? replyToolId = null)
+        string expectedToolId, string replyToolId)
     {
+        if (string.IsNullOrWhiteSpace(expectedToolId))
+            return PolicyDecision.Deny("elicitation-tool-invalid");
+
+        if (string.IsNullOrWhiteSpace(callerSid))
+            return PolicyDecision.Deny("caller-identity-missing");
+
+        if (string.IsNullOrWhiteSpace(decidedBySid))
+            return PolicyDecision.Deny("approver-identity-missing");
+
         if (!string.Equals(correlationId, replyCorrelationId, StringComparison.Ordinal))
             return PolicyDecision.Deny("elicitation-correlation-mismatch");
 
         if (!CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(expectedHash), Encoding.UTF8.GetBytes(replyHash)))
+                Encoding.UTF8.GetBytes(expectedHash), Encoding.UTF8.GetBytes(replyHash ?? string.Empty)))
             return PolicyDecision.Deny("elicitation-param-mismatch");
 
+        // An explicit denial is reported as a denial whatever tool the reply names.
         if (!approved)
             return PolicyDecision.Deny("elicitation-denied");
 
-        if (expectedToolId is not null &&
-            !string.Equals(expectedToolId, replyToolId, StringComparison.Ordinal))
+        if (!string.Equals(expectedToolId, replyToolId, StringComparison.Ordinal))
             return PolicyDecision.Deny("elicitation-tool-mismatch");
 
         // A caller confirmation is never an authorization decision. This check is

@@ -118,7 +118,7 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         // 7 — elicitation for write/destructive
         if (tool.ElicitationRequired)
         {
-            var paramHash = ConsentEngine.HashParameters(request.Parameters);
+            var paramHash = ConsentEngine.HashOperation(tool.ToolId, context.CallerSid, request.Parameters);
 
             // Register a cancellation source so a revocation of this tool mid-wait aborts it.
             using var revokeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

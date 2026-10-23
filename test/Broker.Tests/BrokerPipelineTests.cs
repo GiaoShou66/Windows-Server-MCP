@@ -173,13 +173,14 @@ public sealed class BrokerPipelineTests : IDisposable
     [Fact]
     public async Task UntaintedCallerPassesTaintGateForWriteTool()
     {
-        // Reaches a later gate (write-tool has zero parameters and no elicitation
-        // requirement, so it proceeds past every gate up to JEA invoke, which fails because
-        // the fake server path doesn't exist) — proving the taint gate specifically is
-        // caller-scoped, not tool-scoped: an untainted caller is never blocked by it.
+        // Reaches a later gate (write-tool has zero parameters, so it proceeds past every gate
+        // up to the executor) — proving the taint gate specifically is caller-scoped, not
+        // tool-scoped: an untainted caller is never blocked by it. The manifest sets
+        // requiresElicitation:false for this tool, but write tools always require approval, so
+        // an approving channel is supplied.
         var pipeline = BuildPipeline(new FakeSignatureVerifier(true));
         var ctx = CallContext.New("CLEAN-CALLER", "write-tool");
-        var result = await pipeline.DispatchAsync(Call("write-tool"), ctx, ThrowingElicitation(), CancellationToken.None);
+        var result = await pipeline.DispatchAsync(Call("write-tool"), ctx, DummyElicitation(), CancellationToken.None);
 
         Assert.NotEqual("caller-tainted", result.RejectReason);
         Assert.Equal(1, _jea.Calls);
