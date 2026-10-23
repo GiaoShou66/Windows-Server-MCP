@@ -267,6 +267,9 @@ public sealed class SignatureVerifier : ISignatureVerifier
                 return false;
             }
 
+            if (!VerifyEffectiveModule(tool, path, expected))
+                return false;
+
             return true;
         }
         catch (Exception ex)
@@ -274,6 +277,64 @@ public sealed class SignatureVerifier : ISignatureVerifier
             _logger.LogWarning(ex, "Signature check threw for {Tool}; treating as unverified", tool.ToolId);
             return false;
         }
+    }
+
+    private bool VerifyEffectiveModule(ToolManifest tool, string manifestPath, string expectedThumbprint)
+    {
+        var moduleName = tool.JeaMapping.ModuleName;
+        if (string.IsNullOrWhiteSpace(moduleName))
+            return true;
+
+        var effectivePath = ResolveModulePath(moduleName);
+        if (effectivePath is null)
+        {
+            _logger.LogWarning("Unable to resolve effective JEA module {Module} for {Tool}",
+                moduleName, tool.ToolId);
+            return false;
+        }
+
+        try
+        {
+            if (!string.Equals(
+                    Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(manifestPath))),
+                    Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(effectivePath))),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Manifest module and effective JEA module differ for {Tool}: {Manifest} vs {Effective}",
+                    tool.ToolId, manifestPath, effectivePath);
+                return false;
+            }
+
+            var (trusted, thumbprint, hr, win32Error) = WinTrust.VerifyAndGetThumbprint(effectivePath);
+            if (!trusted || !string.Equals(thumbprint, expectedThumbprint, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Effective JEA module signature failed for {Tool}: hr=0x{Hr:X8} win32Error={Win32}",
+                    tool.ToolId, hr, win32Error);
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Effective JEA module verification failed for {Tool}", tool.ToolId);
+            return false;
+        }
+    }
+
+    private static string? ResolveModulePath(string moduleName)
+    {
+        var pathEntries = (Environment.GetEnvironmentVariable("PSModulePath") ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var root in pathEntries)
+        {
+            var candidate = Path.Combine(root, moduleName, $"{moduleName}.psm1");
+            if (File.Exists(candidate))
+                return Path.GetFullPath(candidate);
+        }
+
+        return null;
     }
 }
 

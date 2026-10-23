@@ -42,6 +42,20 @@
 - Keep `Elicitation:RequireDistinctApprover` enabled for all write/destructive tools.
 - Configure an explicit `ApproverSids` allowlist and protect the approval pipe with its
   own ACL.
+- Never derive an approver (or any authorization-relevant) identity from a field inside a
+  client-supplied message body. Use only identity obtained from OS-level impersonation of
+  the connection itself (e.g. `RunAsClient`). This review found and fixed exactly this
+  mistake in the same-pipe elicitation reply path — see `docs/security-audit.md`, "P0 —
+  Approval forgery via client-supplied identity field". If a future endpoint or protocol
+  change introduces a new way to signal a decision, audit it for the same pattern before
+  shipping it.
+
+The deployment scripts enforce these requirements: `register-jea.ps1` refuses
+missing or unsigned wrapper modules and rejects module roots writable by broad
+local principals. `install-service.ps1` rejects unsigned `Broker.Host.exe` and
+publish directories writable by `Everyone`, `Authenticated Users`, or
+`BUILTIN\Users`. Do not use a developer or temporary publish directory in
+production.
 - Review the exact tool, parameters, target, caller, and expected impact before approval.
 - Treat a disconnect or timeout as an uncertain execution outcome until the underlying
   PowerShell operation is verified stopped.

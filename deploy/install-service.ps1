@@ -28,6 +28,33 @@ $ErrorActionPreference = 'Stop'
 $exe = Join-Path $PublishDir 'Broker.Host.exe'
 if (-not (Test-Path $exe)) { throw "Broker.Host.exe not found in $PublishDir" }
 
+function Assert-ProtectedDeploymentPath {
+    param([Parameter(Mandatory = $true)] [string] $Path)
+
+    $resolved = (Resolve-Path -LiteralPath $Path).Path
+    $acl = Get-Acl -LiteralPath $resolved
+    $broadPrincipals = @(
+        'Everyone',
+        'NT AUTHORITY\Authenticated Users',
+        'BUILTIN\Users'
+    )
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -eq 'Allow' -and
+            ($broadPrincipals -contains $rule.IdentityReference.Value) -and
+            (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
+             ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0 -or
+             ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne 0)) {
+            throw "Refusing deployment path '$resolved': a broad principal can modify it."
+        }
+    }
+}
+
+Assert-ProtectedDeploymentPath -Path $PublishDir
+$signature = Get-AuthenticodeSignature -LiteralPath $exe
+if ($signature.Status -ne 'Valid') {
+    throw "Broker.Host.exe is not validly Authenticode-signed (status: $($signature.Status))."
+}
+
 # Transcript directory, writable by the gMSA only.
 if (-not (Test-Path $TranscriptDir)) {
     New-Item -ItemType Directory -Path $TranscriptDir -Force | Out-Null

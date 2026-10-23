@@ -472,10 +472,17 @@ public sealed class NamedPipeServer
         var paramHash = root.TryGetProperty("paramHash", out var h) ? h.GetString() ?? "" : "";
         var approved = root.TryGetProperty("approved", out var a) && a.GetBoolean();
         var toolId = root.TryGetProperty("toolId", out var t) ? t.GetString() ?? "" : "";
-        // The approver's identity is the connection's caller SID; a separate approval pipe
-        // (when configured) carries a distinct approver SID instead.
-        var decidedBy = root.TryGetProperty("decidedBySid", out var d) ? d.GetString() ?? callerSid : callerSid;
-        return new ElicitationReply(correlationId, paramHash, approved, decidedBy, toolId);
+
+        // SECURITY: the approver identity on this path MUST be the connection's own
+        // OS-impersonated callerSid, captured via RunAsClient at connect time — never a
+        // client-supplied field. A prior version read an optional "decidedBySid" from the
+        // reply body here, which let a caller forge an arbitrary approver identity in its
+        // own JSON and defeat ConsentEngine's self-approval-forbidden check entirely (send
+        // approved:true with any decidedBySid != its own SID). Any JSON field is untrusted
+        // input; it is never used for an authorization decision. The distinct-approver path
+        // (ApprovalPipeServer, separate pipe) is unaffected — it already derives its approver
+        // identity the same way, from that pipe's own impersonation, not from the message body.
+        return new ElicitationReply(correlationId, paramHash, approved, callerSid, toolId);
     }
 
     private static ToolCallRequest ParseToolCall(JsonElement root)

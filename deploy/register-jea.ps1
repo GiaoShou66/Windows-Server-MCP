@@ -21,6 +21,34 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Assert-ProtectedDirectory {
+    param([Parameter(Mandatory = $true)] [string] $Path)
+
+    $acl = Get-Acl -LiteralPath $Path
+    $broadPrincipals = @(
+        'Everyone',
+        'NT AUTHORITY\Authenticated Users',
+        'BUILTIN\Users'
+    )
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -eq 'Allow' -and
+            ($broadPrincipals -contains $rule.IdentityReference.Value) -and
+            (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
+             ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0 -or
+             ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne 0)) {
+            throw "Refusing to use ACL-writable module directory '$Path' for JEA code."
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath $ModulesSourceDir -PathType Container)) {
+    throw "ModulesSourceDir '$ModulesSourceDir' not found; refusing to register endpoints without wrapper modules."
+}
+if (-not (Test-Path -LiteralPath $SystemModulesRoot -PathType Container)) {
+    New-Item -ItemType Directory -Path $SystemModulesRoot -Force | Out-Null
+}
+Assert-ProtectedDirectory -Path $SystemModulesRoot
+
 # Role capabilities must live under <Module>\RoleCapabilities\*.psrc to be resolvable.
 $rcDir = Join-Path $ModuleRoot 'RoleCapabilities'
 New-Item -ItemType Directory -Path $rcDir -Force | Out-Null
@@ -43,8 +71,9 @@ if (Test-Path $ModulesSourceDir) {
         Copy-Item -Path $_.FullName -Destination $installed -Force
         $sig = Get-AuthenticodeSignature -FilePath $_.FullName
         if ($sig.Status -ne 'Valid') {
-            Write-Warning "Module $moduleName is not validly signed (status: $($sig.Status)). The broker will refuse it at call time."
+            throw "Wrapper module '$moduleName' is not validly signed (status: $($sig.Status)); refusing registration."
         }
+        Assert-ProtectedDirectory -Path $dest
         if ((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash -ne
             (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash) {
             throw "Installed module hash mismatch for $moduleName."

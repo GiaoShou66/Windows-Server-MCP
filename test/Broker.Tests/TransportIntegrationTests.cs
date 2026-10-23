@@ -70,8 +70,12 @@ internal sealed class ChannelStream : Stream
 }
 
 /// <summary>Dispatcher stub: "echo" tools return immediately, "gated" tools call elicitation first.</summary>
-file sealed class StubDispatcher : IToolCallDispatcher
+internal sealed class StubDispatcher : IToolCallDispatcher
 {
+    /// <summary>Captures the reply the pipeline actually received, for tests that need to
+    /// inspect DecidedBySid independently of whatever ConsentEngine would do with it.</summary>
+    public ElicitationReply? LastReply { get; private set; }
+
     public async Task<ToolCallResult> DispatchAsync(
         ToolCallRequest request, CallContext context, ElicitationChannel elicitation, CancellationToken ct)
     {
@@ -83,6 +87,7 @@ file sealed class StubDispatcher : IToolCallDispatcher
             var paramHash = "fixed-hash";
             var ectx = new ElicitationContext(context.CorrelationId, request.ToolId, context.CallerSid, paramHash);
             var reply = await elicitation.RequestAsync(ectx, ct);
+            LastReply = reply;
 
             return reply.Approved && reply.ParamHash == paramHash
                 ? ToolCallResult.Ok("{\"approved\":true}")
@@ -96,6 +101,9 @@ file sealed class StubDispatcher : IToolCallDispatcher
 public class TransportIntegrationTests
 {
     private static NamedPipeServer BuildServer(out ElicitationRouter router, bool distinctApprover = false)
+        => BuildServer(out router, out _, distinctApprover);
+
+    private static NamedPipeServer BuildServer(out ElicitationRouter router, out StubDispatcher dispatcher, bool distinctApprover = false)
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -107,7 +115,8 @@ public class TransportIntegrationTests
 
         var securityFactory = new PipeSecurityFactory(config, NullLogger<PipeSecurityFactory>.Instance);
         router = new ElicitationRouter(NullLogger<ElicitationRouter>.Instance);
-        return new NamedPipeServer(securityFactory, new StubDispatcher(), router, config,
+        dispatcher = new StubDispatcher();
+        return new NamedPipeServer(securityFactory, dispatcher, router, config,
             NullLogger<NamedPipeServer>.Instance);
     }
 
@@ -181,6 +190,61 @@ public class TransportIntegrationTests
 
         Assert.Equal("tools/result", result.GetProperty("type").GetString());
         Assert.True(result.GetProperty("success").GetBoolean());
+
+        cts.Cancel();
+        await Task.WhenAny(serveTask, Task.Delay(1000));
+    }
+
+    /// <summary>
+    /// Regression test for a P0 authorization bypass: ParseElicitationReply used to read an
+    /// optional "decidedBySid" field from the reply JSON and trust it as the approver identity
+    /// when present, falling back to the connection's real callerSid only when absent. Since
+    /// the caller controls its own reply message, this let a caller self-approve any
+    /// write/destructive call by simply claiming a forged, different-looking approver SID —
+    /// completely defeating ConsentEngine's self-approval-forbidden check, which has no way to
+    /// know the "decidedBySid" it receives was never authenticated. The fix removes the
+    /// client-controllable field entirely; this test proves a forged value in the wire
+    /// protocol is silently discarded and the real connection identity is used instead.
+    /// </summary>
+    [Fact]
+    public async Task ForgedDecidedBySidInReplyIsIgnoredAndRealCallerSidIsUsed()
+    {
+        var server = BuildServer(out _, out var dispatcher);
+        var (serverSide, clientSide) = ChannelStream.CreatePair();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        const string realCallerSid = "REAL-CALLER-SID";
+        const string forgedApproverSid = "S-1-5-21-FORGED-DISTINCT-APPROVER";
+
+        var serveTask = server.ServeAsync(serverSide, () => true, realCallerSid, cts.Token);
+
+        var exchange = Task.Run(async () =>
+        {
+            await WriteJsonAsync(clientSide, new { type = "tools/call", toolId = "gated", parameters = new { } }, cts.Token);
+
+            var request = await ReadJsonAsync(clientSide, cts.Token);
+            var correlationId = request.GetProperty("correlationId").GetString();
+            var paramHash = request.GetProperty("paramHash").GetString();
+
+            // The attack: the SAME connection that made the call also answers the elicitation,
+            // claiming (via a field it fully controls) to be a distinct approver identity.
+            await WriteJsonAsync(clientSide, new
+            {
+                type = "elicitation/reply",
+                correlationId,
+                paramHash,
+                approved = true,
+                decidedBySid = forgedApproverSid
+            }, cts.Token);
+
+            return await ReadJsonAsync(clientSide, cts.Token);
+        });
+
+        await exchange.WaitAsync(TimeSpan.FromSeconds(8));
+
+        Assert.NotNull(dispatcher.LastReply);
+        Assert.Equal(realCallerSid, dispatcher.LastReply!.DecidedBySid);
+        Assert.NotEqual(forgedApproverSid, dispatcher.LastReply.DecidedBySid);
 
         cts.Cancel();
         await Task.WhenAny(serveTask, Task.Delay(1000));
