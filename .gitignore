@@ -1,0 +1,13 @@
+# .NET build output
+bin/
+obj/
+*.user
+
+# Generated JEA session/role configs (produced by JeaConfigGenerator)
+jea/generated/
+
+# Runtime transcripts
+*.transcript.txt
+
+# Local secrets / environment overrides
+appsettings.*.local.json
