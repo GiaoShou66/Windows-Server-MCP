@@ -70,7 +70,7 @@ public sealed class CorrelationLog
         {
             // The audit log must not be writable by ordinary local users; under C:\ the
             // inherited BUILTIN\Users(Modify) ACE would allow exactly that.
-            Broker.Core.DirectoryProtection.EnsureProtected(dir);
+            Broker.Core.DirectoryProtection.VerifyProtected(dir);
         }
     }
 

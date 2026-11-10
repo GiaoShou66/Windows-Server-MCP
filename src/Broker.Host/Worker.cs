@@ -37,7 +37,9 @@ public sealed class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!RunStartupSelfCheck())
+        bool placeholdersOk = RunPlaceholderSelfCheck();
+        bool startupOk = RunStartupSelfCheck();
+        if (!placeholdersOk || !startupOk)
         {
             _logger.LogCritical("Startup self-check failed; refusing to open pipe listener");
             _lifetime.StopApplication();
@@ -57,6 +59,57 @@ public sealed class Worker : BackgroundService
         await Task.WhenAll(servers);
     }
 
+    /// <summary>
+    /// Self-check for unconfigured deployment placeholders.
+    /// Fails closed: if any placeholder thumbprint, placeholder SID, or misconfigured distinct
+    /// approver list is detected, logs a single clear, actionable error and refuses to start.
+    /// </summary>
+    internal bool RunPlaceholderSelfCheck() =>
+        CheckConfigurationPlaceholders(_config, _manifest.All, _logger);
+
+    /// <summary>
+    /// Pure validation logic for unconfigured deployment placeholders so it can be tested
+    /// directly without spinning up background services.
+    /// </summary>
+    internal static bool CheckConfigurationPlaceholders(
+        IConfiguration config,
+        IEnumerable<ToolManifest> tools,
+        ILogger logger)
+    {
+        bool ok = true;
+
+        var allowedSids = config.GetSection("Pipe:AllowedSids").Get<string[]>() ?? Array.Empty<string>();
+        foreach (var sid in allowedSids)
+        {
+            if (PlaceholderDiagnostics.IsPlaceholderSid(sid))
+            {
+                logger.LogError("Unconfigured deployment placeholder: Pipe:AllowedSids contains '{Sid}'. Replace with genuine authorized caller SIDs in appsettings.json before starting the broker.", sid);
+                ok = false;
+            }
+        }
+
+        bool requireDistinct = bool.TryParse(config["Elicitation:RequireDistinctApprover"], out var distinct) && distinct;
+        var approverSids = config.GetSection("Elicitation:ApproverSids").Get<string[]>() ?? Array.Empty<string>();
+        if (requireDistinct && (approverSids.Length == 0 || approverSids.All(string.IsNullOrWhiteSpace)))
+        {
+            logger.LogError("Unconfigured deployment placeholder: Elicitation:RequireDistinctApprover is true, but Elicitation:ApproverSids is empty. Configure authorized approver SIDs in appsettings.json before starting the broker.");
+            ok = false;
+        }
+
+        foreach (var tool in tools)
+        {
+            if (tool.Revoked) continue;
+
+            if (PlaceholderDiagnostics.IsPlaceholderThumbprint(tool.Server.SignatureThumbprint))
+            {
+                logger.LogError("Unconfigured deployment placeholder: Tool '{Tool}' has placeholder thumbprint '{Thumbprint}'. Sign the tool script and record its genuine Authenticode thumbprint in policy/manifest.json before starting the broker.", tool.ToolId, tool.Server.SignatureThumbprint);
+                ok = false;
+            }
+        }
+
+        return ok;
+    }
+
     private bool RunStartupSelfCheck()
     {
         bool ok = true;
@@ -66,7 +119,7 @@ public sealed class Worker : BackgroundService
         var transcriptDir = _config["Jea:TranscriptDir"] ?? @"C:\McpBroker\Transcripts";
         try
         {
-            DirectoryProtection.EnsureProtected(transcriptDir);
+            DirectoryProtection.VerifyProtected(transcriptDir);
         }
         catch (Exception ex)
         {
