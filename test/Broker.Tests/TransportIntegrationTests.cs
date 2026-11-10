@@ -277,6 +277,97 @@ public class TransportIntegrationTests
         cts.Cancel();
         await Task.WhenAny(serveTask, Task.Delay(1000));
     }
+
+    [Fact]
+    public async Task ReaderRejectsOverLimitCallAndDoesNotDeadlockElicitationReply()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Pipe:Name"] = "test-concurrency",
+            ["Pipe:MaxConcurrentPerConnection"] = "1",
+            ["Pipe:FrameTimeoutSeconds"] = "5",
+            ["Elicitation:TtlSeconds"] = "5",
+            ["Elicitation:RequireDistinctApprover"] = "false"
+        }).Build();
+
+        var securityFactory = new PipeSecurityFactory(config, NullLogger<PipeSecurityFactory>.Instance);
+        var router = new ElicitationRouter(NullLogger<ElicitationRouter>.Instance);
+        var dispatcher = new StubDispatcher();
+        var server = new NamedPipeServer(securityFactory, dispatcher, router, config, NullLogger<NamedPipeServer>.Instance);
+
+        var (serverSide, clientSide) = ChannelStream.CreatePair();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var serveTask = server.ServeAsync(serverSide, () => true, "CALLER-SID", cts.Token);
+
+        // 1. Send first call: "gated" (holds concurrency slot while waiting on elicitation)
+        await WriteJsonAsync(clientSide, new { type = "tools/call", toolId = "gated", parameters = new { } }, cts.Token);
+        var elicitationReq = await ReadJsonAsync(clientSide, cts.Token);
+        Assert.Equal("elicitation/request", elicitationReq.GetProperty("type").GetString());
+        var correlationId = elicitationReq.GetProperty("correlationId").GetString();
+
+        // 2. Send second call: "echo" (concurrency is 1/1, so this is over-limit)
+        await WriteJsonAsync(clientSide, new { type = "tools/call", toolId = "echo", parameters = new { } }, cts.Token);
+
+        // With the fix, the reader must NOT block; it immediately yields over-limit structured error
+        var overLimitResult = await ReadJsonAsync(clientSide, cts.Token);
+        Assert.False(overLimitResult.GetProperty("success").GetBoolean());
+        Assert.Equal("concurrency-limit-exceeded", overLimitResult.GetProperty("rejectReason").GetString());
+
+        // 3. Send elicitation reply for the first call: must be read and completed
+        await WriteJsonAsync(clientSide, new
+        {
+            type = "elicitation/reply",
+            correlationId,
+            paramHash = "fixed-hash",
+            approved = true
+        }, cts.Token);
+
+        var gatedResult = await ReadJsonAsync(clientSide, cts.Token);
+        Assert.True(gatedResult.GetProperty("success").GetBoolean());
+
+        cts.Cancel();
+        await Task.WhenAny(serveTask, Task.Delay(1000));
+    }
+
+    [Fact]
+    public async Task MultiInstancePipeServerCreatesSlotsWithoutUnauthorizedAccessException()
+    {
+        var pipeName = $"mcp-test-slots-{Guid.NewGuid():N}";
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Pipe:Name"] = pipeName,
+            ["Pipe:MaxInstances"] = "3",
+            ["Pipe:AllowedSids:0"] = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value
+        }).Build();
+
+        var securityFactory = new PipeSecurityFactory(config, NullLogger<PipeSecurityFactory>.Instance);
+        var router = new ElicitationRouter(NullLogger<ElicitationRouter>.Instance);
+        var dispatcher = new StubDispatcher();
+        var server = new NamedPipeServer(securityFactory, dispatcher, router, config, NullLogger<NamedPipeServer>.Instance);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var runTask = server.RunAsync(cts.Token);
+
+        // Connect 3 clients simultaneously to prove all 3 slots are open and listening
+        var client1 = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+        var client2 = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+        var client3 = new System.IO.Pipes.NamedPipeClientStream(".", pipeName, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+
+        await client1.ConnectAsync(cts.Token);
+        await client2.ConnectAsync(cts.Token);
+        await client3.ConnectAsync(cts.Token);
+
+        Assert.True(client1.IsConnected);
+        Assert.True(client2.IsConnected);
+        Assert.True(client3.IsConnected);
+
+        client1.Dispose();
+        client2.Dispose();
+        client3.Dispose();
+        cts.Cancel();
+        try { await runTask; } catch (OperationCanceledException) { }
+    }
 }
 
 public class ElicitationRouterTests

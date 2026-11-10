@@ -265,19 +265,22 @@ public sealed class NamedPipeServer
     private readonly ElicitationRouter _router;
     private readonly IConfiguration _config;
     private readonly ILogger<NamedPipeServer> _logger;
+    private readonly Action? _onFatalError;
 
     public NamedPipeServer(
         PipeSecurityFactory securityFactory,
         IToolCallDispatcher dispatcher,
         ElicitationRouter router,
         IConfiguration config,
-        ILogger<NamedPipeServer> logger)
+        ILogger<NamedPipeServer> logger,
+        Action? onFatalError = null)
     {
         _securityFactory = securityFactory;
         _dispatcher = dispatcher;
         _router = router;
         _config = config;
         _logger = logger;
+        _onFatalError = onFatalError;
     }
 
     private string PipeName => _config["Pipe:Name"] ?? "McpBroker";
@@ -307,16 +310,23 @@ public sealed class NamedPipeServer
             NamedPipeServerStream stream;
             try
             {
-                // First instance claims the name with FILE_FLAG_FIRST_PIPE_INSTANCE so a
-                // process that squatted "McpBroker" before service start is detected rather
-                // than silently shadowed.
+                // H1: Only the first instance on slot 0 claims the name with FILE_FLAG_FIRST_PIPE_INSTANCE
+                // so an external process that squatted "McpBroker" before service start is detected rather
+                // than silently shadowed. Slots 1..N and reconnections must NOT use this flag.
+                bool useFirstPipeInstance = (slot == 0 && first);
                 var options = PipeOptions.Asynchronous |
-                    (first ? PipeOptions.FirstPipeInstance : PipeOptions.None);
+                    (useFirstPipeInstance ? PipeOptions.FirstPipeInstance : PipeOptions.None);
                 stream = NamedPipeServerStreamAcl.Create(
                     PipeName, PipeDirection.InOut, MaxInstances,
                     PipeTransmissionMode.Byte, options,
                     inBufferSize: 0, outBufferSize: 0, pipeSecurity: security);
                 first = false;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogCritical(ex, "Slot {Slot}: unauthorized access creating pipe instance (possible squatting or permission failure); stopping host", slot);
+                _onFatalError?.Invoke();
+                break;
             }
             catch (IOException ex)
             {
@@ -469,16 +479,39 @@ public sealed class NamedPipeServer
 
                 var context = CallContext.New(callerSid, request!.ToolId);
 
-                // Wait for a concurrency slot before starting the dispatch. The wait is on
-                // the reader loop deliberately: a client that floods calls is told to slow
-                // down (its frames queue in the pipe) rather than being allowed to fan out.
-                await concurrency.WaitAsync(ct);
-                var dispatchTask = DispatchAndRespondAsync(request, context, elicitation, WriteFrameLocked, ct);
+                // M1: Do NOT block the reader loop on concurrency. If saturated, reject
+                // over-limit calls immediately with a structured error so the reader loop
+                // keeps reading and elicitation replies are never starved.
+                if (!concurrency.Wait(0))
+                {
+                    _logger.LogWarning("Connection SID={Sid} exceeded max concurrency ({Max}); rejecting call {Tool}",
+                        callerSid, MaxConcurrentPerConnection, request.ToolId);
+                    await WriteFrameLocked(JsonSerializer.Serialize(new
+                    {
+                        type = "tools/result",
+                        correlationId = context.CorrelationId,
+                        success = false,
+                        rejectReason = "concurrency-limit-exceeded",
+                        payload = (string?)null
+                    }));
+                    continue;
+                }
+
+                var dispatchTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await DispatchAndRespondAsync(request, context, elicitation, WriteFrameLocked, ct);
+                    }
+                    finally
+                    {
+                        concurrency.Release();
+                    }
+                }, ct);
                 inflight[dispatchTask] = 0;
                 _ = dispatchTask.ContinueWith(t =>
                 {
                     inflight.TryRemove(t, out _);
-                    concurrency.Release();
                 }, TaskScheduler.Default);
             }
         }

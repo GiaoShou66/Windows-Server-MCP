@@ -47,6 +47,76 @@ if (args.Length > 0 && string.Equals(args[0], "generate-jea", StringComparison.O
     }
 }
 
+// CLI mode: `Broker.Host self-check [appsettingsPath]`
+// Allows an AI agent or automated orchestrator to verify that the broker's configuration
+// is complete, valid, and free of placeholder credentials before starting.
+if (args.Length > 0 && string.Equals(args[0], "self-check", StringComparison.OrdinalIgnoreCase))
+{
+    var configBuilder = new ConfigurationBuilder();
+    var appsettingsPath = args.Length > 1 ? args[1] : "src/Broker.Host/appsettings.json";
+    if (File.Exists(appsettingsPath))
+    {
+        configBuilder.AddJsonFile(Path.GetFullPath(appsettingsPath), optional: false);
+    }
+    else
+    {
+        configBuilder.AddJsonFile("appsettings.json", optional: true);
+    }
+    var config = configBuilder.Build();
+
+    using var loggerFactory = LoggerFactory.Create(b => b.AddConsole(o =>
+    {
+        o.LogToStandardErrorThreshold = LogLevel.Trace;
+    }));
+    var logger = loggerFactory.CreateLogger("Broker.Host.SelfCheck");
+
+    var manifestPath = config["Manifest:Path"] ?? "policy/manifest.json";
+    var integrityPath = config["Manifest:IntegrityPath"] ?? (manifestPath + ".sha256");
+    var requireIntegrity = !bool.TryParse(config["Manifest:RequireIntegrity"], out var reqInt) || reqInt;
+
+    try
+    {
+        using var store = new Broker.Registry.ManifestStore(
+            manifestPath, loggerFactory.CreateLogger<Broker.Registry.ManifestStore>(), requireIntegrity, integrityPath);
+
+        bool placeholdersOk = Worker.CheckConfigurationPlaceholders(config, store.All, logger);
+        var activeTools = store.All.Where(t => !t.Revoked).ToList();
+        var revokedTools = store.All.Where(t => t.Revoked).ToList();
+
+        if (placeholdersOk)
+        {
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                status = "passed",
+                manifestPath,
+                totalTools = store.All.Count,
+                activeTools = activeTools.Count,
+                revokedTools = revokedTools.Count,
+                message = "Broker configuration self-check passed. No placeholder credentials or thumbprints detected."
+            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            return 0;
+        }
+        else
+        {
+            Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                status = "failed",
+                manifestPath,
+                totalTools = store.All.Count,
+                activeTools = activeTools.Count,
+                revokedTools = revokedTools.Count,
+                message = "Broker configuration self-check failed due to unconfigured placeholders. See logs."
+            }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            return 1;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Self-check failed to load manifest: {ex.Message}");
+        return 1;
+    }
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddWindowsService(opts => opts.ServiceName = "McpBroker");
@@ -109,7 +179,17 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<IToolCallDispatcher, BrokerPipeline>();
 builder.Services.AddSingleton<PipeSecurityFactory>();
 builder.Services.AddSingleton<ElicitationRouter>();
-builder.Services.AddSingleton<NamedPipeServer>();
+builder.Services.AddSingleton(sp =>
+{
+    var lifetime = sp.GetRequiredService<IHostApplicationLifetime>();
+    return new NamedPipeServer(
+        sp.GetRequiredService<PipeSecurityFactory>(),
+        sp.GetRequiredService<IToolCallDispatcher>(),
+        sp.GetRequiredService<ElicitationRouter>(),
+        sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+        sp.GetRequiredService<ILogger<NamedPipeServer>>(),
+        () => lifetime.StopApplication());
+});
 builder.Services.AddSingleton<ApprovalPipeServer>();
 builder.Services.AddHostedService<Worker>();
 
