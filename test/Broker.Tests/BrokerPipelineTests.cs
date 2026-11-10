@@ -6,6 +6,7 @@ using Broker.JeaExecution;
 using Broker.Policy;
 using Broker.Registry;
 using Broker.Transport;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -105,7 +106,7 @@ public sealed class BrokerPipelineTests : IDisposable
         File.WriteAllText(_manifestPath, JsonSerializer.Serialize(manifest));
     }
 
-    private BrokerPipeline BuildPipeline(ISignatureVerifier verifier, RateLimiter? rateLimiter = null, TaintTracker? taint = null)
+    private BrokerPipeline BuildPipeline(ISignatureVerifier verifier, RateLimiter? rateLimiter = null, TaintTracker? taint = null, Microsoft.Extensions.Configuration.IConfiguration? config = null)
     {
         var manifestStore = new ManifestStore(_manifestPath, NullLogger<ManifestStore>.Instance);
         return new BrokerPipeline(
@@ -114,7 +115,8 @@ public sealed class BrokerPipelineTests : IDisposable
             new AmsiScanner(NullLogger<AmsiScanner>.Instance), new ConsentEngine(),
             new ArgvBuilder(), new JeaEndpointClient(NullLogger<JeaEndpointClient>.Instance),
             taint ?? new TaintTracker(windowSeconds: 300),
-            new CorrelationLog(_correlationLogPath), NullLogger<BrokerPipeline>.Instance);
+            new CorrelationLog(_correlationLogPath), NullLogger<BrokerPipeline>.Instance,
+            config);
     }
 
     private static ToolCallRequest Call(string toolId) => new() { ToolId = toolId, Parameters = new() };
@@ -264,6 +266,24 @@ public sealed class BrokerPipelineTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Equal("elicitation-denied", result.RejectReason);
+    }
+
+    [Fact]
+    public async Task MutatingToolFailsFastWhenDistinctApproverIsDisabled()
+    {
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Elicitation:RequireDistinctApprover"] = "false"
+        }).Build();
+
+        var pipeline = BuildPipeline(new FakeSignatureVerifier(true), config: config);
+        var ctx = CallContext.New("CALLER", "write-tool-elicited");
+
+        // Uses ThrowingElicitation() to prove it fails fast BEFORE invoking any elicitation channel
+        var result = await pipeline.DispatchAsync(Call("write-tool-elicited"), ctx, ThrowingElicitation(), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("distinct-approver-required", result.RejectReason);
     }
 
     private static ElicitationChannel DummyElicitation() =>

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Broker.Audit;
 using Broker.Core;
@@ -8,13 +9,16 @@ using Broker.Registry;
 using Broker.Transport;
 using Microsoft.Extensions.Logging;
 
+[assembly: InternalsVisibleTo("Broker.Tests")]
+
 namespace Broker.Host;
 
 /// <summary>
 /// The fail-closed call pipeline. Gates run in a fixed order; any gate that does not
-/// explicitly allow terminates the call. Order (design 6.1):
-///   1 manifest lookup  2 signature re-check  3 risk tier  4 parameter validate
-///   5 untrusted-source gate  6 rate limit  7 elicitation  8 JEA invoke
+/// explicitly allow terminates the call. Order (DispatchAsync):
+///   1 manifest lookup -> 2 rate-limit -> 3 signature re-check -> 3b taint ->
+///   4 parameter allowlist -> AMSI -> 5 untrusted-source gate -> 7 elicitation -> 8 JEA invoke
+/// Rate limiting runs second (before expensive signature verification) for DoS resistance.
 /// Audit events are emitted at the stage that concludes, success or reject.
 /// </summary>
 public sealed class BrokerPipeline : IToolCallDispatcher
@@ -31,6 +35,7 @@ public sealed class BrokerPipeline : IToolCallDispatcher
     private readonly TaintTracker _taint;
     private readonly CorrelationLog _correlationLog;
     private readonly ILogger<BrokerPipeline> _logger;
+    private readonly bool _requireDistinctApprover;
 
     // toolId -> (correlationId -> cts) for in-flight elicitations, so a revocation can
     // cancel any call currently waiting on human approval for that tool.
@@ -40,7 +45,8 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         ManifestStore manifest, ISignatureVerifier signatures, ParameterValidator paramValidator,
         UntrustedSourceGate untrustedGate, RateLimiter rateLimiter, AmsiScanner amsi,
         ConsentEngine consent, ArgvBuilder argvBuilder, JeaEndpointClient jea,
-        TaintTracker taint, CorrelationLog correlationLog, ILogger<BrokerPipeline> logger)
+        TaintTracker taint, CorrelationLog correlationLog, ILogger<BrokerPipeline> logger,
+        Microsoft.Extensions.Configuration.IConfiguration? config = null)
     {
         _manifest = manifest;
         _signatures = signatures;
@@ -54,6 +60,8 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         _taint = taint;
         _correlationLog = correlationLog;
         _logger = logger;
+        _requireDistinctApprover = config is null ||
+            !bool.TryParse(config["Elicitation:RequireDistinctApprover"], out var b) || b;
 
         _manifest.ToolsRevoked += OnToolsRevoked;
     }
@@ -120,6 +128,14 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         // 7 — elicitation for write/destructive
         if (tool.ElicitationRequired)
         {
+            if (!_requireDistinctApprover)
+            {
+                // M2: Same-pipe elicitation can never approve (approver == caller).
+                // Fail fast with a clear reason instead of waiting for TTL; distinct-approver
+                // mode is the only write path.
+                return Reject(context, "distinct-approver-required");
+            }
+
             var paramHash = ConsentEngine.HashParameters(request.Parameters);
 
             // Register a cancellation source so a revocation of this tool mid-wait aborts it.
@@ -237,8 +253,15 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         return ToolCallResult.Rejected(reason);
     }
 
-    /// <summary>Redacts configured output fields before the payload leaves the broker.</summary>
-    private static string MaskFields(string payloadJson, IReadOnlyCollection<string> maskedFields)
+    /// <summary>
+    /// Redacts configured output fields before the payload leaves the broker.
+    /// Fail-closed: on a non-JSON payload where masked fields are configured, the broker
+    /// must NEVER return the raw unredacted string because doing so would leak sensitive
+    /// fields (SIDs, distinguished names, credentials). If parsing fails, the un-maskable
+    /// payload is replaced with an explicit redaction-failure JSON payload containing no
+    /// raw caller or JEA content.
+    /// </summary>
+    internal static string MaskFields(string payloadJson, IReadOnlyCollection<string> maskedFields)
     {
         if (maskedFields.Count == 0) return payloadJson;
 
@@ -250,7 +273,13 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         }
         catch (JsonException)
         {
-            return payloadJson;
+            // Fail closed: a non-JSON payload cannot be inspected for sensitive fields.
+            // Never return the original payload containing potentially unmasked secrets.
+            return JsonSerializer.Serialize(new
+            {
+                error = "redaction-failure",
+                message = "The tool output was not valid JSON and configured sensitive fields could not be redacted."
+            });
         }
     }
 
