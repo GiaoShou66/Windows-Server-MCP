@@ -64,6 +64,7 @@ param(
     [string] $TranscriptDir,
     [string] $RepoRoot,
     [switch] $AutoTrustCert,
+    [switch] $AllowSidecarRegeneration,
     [switch] $SkipBuild,
     [switch] $SkipTests,
     [switch] $InPlace
@@ -150,10 +151,10 @@ function Get-BrokerDiscovery {
         if (Test-Path $loc) {
             Get-ChildItem -Path $loc -CodeSigningCert -ErrorAction SilentlyContinue | ForEach-Object {
                 $certs += [pscustomobject]@{
-                    Subject = $_.Subject
-                    Thumbprint = $_.Thumbprint
+                    Subject       = $_.Subject
+                    Thumbprint    = $_.Thumbprint
                     StoreLocation = $loc
-                    NotAfter = $_.NotAfter.ToString('o')
+                    NotAfter      = $_.NotAfter.ToString('o')
                     HasPrivateKey = $_.HasPrivateKey
                 }
             }
@@ -178,10 +179,11 @@ function Get-BrokerDiscovery {
     $serviceInfo = if ($svc) {
         [pscustomobject]@{
             Installed = $true
-            Status = $svc.Status.ToString()
+            Status    = $svc.Status.ToString()
             StartType = $svc.StartType.ToString()
         }
-    } else {
+    }
+    else {
         [pscustomobject]@{ Installed = $false; Status = 'NotInstalled'; StartType = $null }
     }
 
@@ -190,9 +192,9 @@ function Get-BrokerDiscovery {
     try {
         Get-PSSessionConfiguration -Name 'McpBroker.*' -ErrorAction SilentlyContinue | ForEach-Object {
             $jeaEndpoints += [pscustomobject]@{
-                Name = $_.Name
+                Name      = $_.Name
                 RunningAs = $_.RunAsUser
-                State = 'Registered'
+                State     = 'Registered'
             }
         }
     }
@@ -221,36 +223,36 @@ function Get-BrokerDiscovery {
     $integrityValid = ($sidecarHash -eq $actualHash)
 
     return [pscustomobject]@{
-        Timestamp = (Get-Date).ToString('o')
-        Machine = [pscustomobject]@{
-            Name = $machineName
-            OSVersion = $osVersion
+        Timestamp               = (Get-Date).ToString('o')
+        Machine                 = [pscustomobject]@{
+            Name           = $machineName
+            OSVersion      = $osVersion
             IsDomainJoined = $isPartOfDomain
-            Domain = $domainName
+            Domain         = $domainName
         }
-        Identity = [pscustomobject]@{
-            CurrentUser = $currentName
-            CurrentSid = $currentSid
+        Identity                = [pscustomobject]@{
+            CurrentUser     = $currentName
+            CurrentSid      = $currentSid
             IsAdministrator = $isAdmin
         }
         CodeSigningCertificates = $certs
-        Features = $features
-        Service = $serviceInfo
-        JeaEndpoints = $jeaEndpoints
-        Manifest = [pscustomobject]@{
-            TotalTools = $totalTools
-            ReadTools = $readTools
-            WriteTools = $writeTools
-            ActiveTools = $activeTools
-            RevokedTools = $revokedTools
-            PlaceholderThumbprints = $placeholderThumbprints
+        Features                = $features
+        Service                 = $serviceInfo
+        JeaEndpoints            = $jeaEndpoints
+        Manifest                = [pscustomobject]@{
+            TotalTools              = $totalTools
+            ReadTools               = $readTools
+            WriteTools              = $writeTools
+            ActiveTools             = $activeTools
+            RevokedTools            = $revokedTools
+            PlaceholderThumbprints  = $placeholderThumbprints
             PlaceholderAccessGroups = $placeholderAccessGroups
-            IntegrityValid = $integrityValid
+            IntegrityValid          = $integrityValid
         }
-        AppSettings = [pscustomobject]@{
-            AllowedSids = $allowedSids
-            HasPlaceholderSid = $hasPlaceholderSid
-            ApproverSids = $approverSids
+        AppSettings             = [pscustomobject]@{
+            AllowedSids             = $allowedSids
+            HasPlaceholderSid       = $hasPlaceholderSid
+            ApproverSids            = $approverSids
             RequireDistinctApprover = $requireDistinctApprover
         }
     }
@@ -271,61 +273,89 @@ function New-BrokerPlan {
         $DiscoveryData = Get-BrokerDiscovery
     }
 
-    # Determine mode: auto-select DevMode if explicitly requested or if not domain-joined
-    $effectiveDevMode = $IsDevMode -or (-not $DiscoveryData.Machine.IsDomainJoined)
+    # Determine mode: explicit DevMode only; never silently select DevMode on non-domain hosts
+    $effectiveDevMode = [bool]$IsDevMode
 
-    # Resolve Signing Strategy
+    # Resolve Signing Strategy (Operator-only: Enterprise CA cert required in production)
     $signingStrategy = 'CreateSelfSigned'
     $targetThumbprint = $CertThumbprint
-    if (-not [string]::IsNullOrWhiteSpace($targetThumbprint)) {
+    if (-not $effectiveDevMode) {
+        if ([string]::IsNullOrWhiteSpace($targetThumbprint)) {
+            throw "Production mode requires an explicit enterprise CA Code Signing certificate thumbprint via -CertThumbprint."
+        }
+        $signingStrategy = 'UseExistingCert'
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($targetThumbprint)) {
         $signingStrategy = 'UseExistingCert'
     }
     elseif ($DiscoveryData.CodeSigningCertificates.Count -gt 0) {
         $signingStrategy = 'UseExistingCert'
         $targetThumbprint = $DiscoveryData.CodeSigningCertificates[0].Thumbprint
     }
-    elseif (-not $effectiveDevMode) {
-        throw "Production mode requires an existing Code Signing certificate thumbprint. None was found."
+    else {
+        $signingStrategy = 'CreateSelfSigned'
+        $targetThumbprint = $null
     }
 
     # Resolve Caller & Approver SIDs
     $effectiveCallerSids = if ($CallerSids -and $CallerSids.Count -gt 0) {
         @($CallerSids)
-    } else {
+    }
+    else {
         @($DiscoveryData.Identity.CurrentSid)
     }
 
     $effectiveRequireDistinct = if ($effectiveDevMode) { $false } else { $true }
     $effectiveApproverSids = if ($ApproverSids -and $ApproverSids.Count -gt 0) {
         @($ApproverSids)
-    } elseif ($effectiveDevMode) {
-        @($DiscoveryData.Identity.CurrentSid)
-    } else {
+    }
+    elseif ($effectiveDevMode) {
+        # DevMode default approver SID must be disjoint from caller SID to satisfy Invariant 1
+        @('S-1-5-21-999999999-999999999-999999999-9999')
+    }
+    else {
         @()
     }
 
-    # Resolve Access Group
+    # Enforce Invariant 1: Caller SIDs and Approver SIDs are disjoint
+    $callerSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$effectiveCallerSids, [System.StringComparer]::OrdinalIgnoreCase)
+    $overlapping = @($effectiveApproverSids | Where-Object { $callerSet.Contains($_) })
+    if ($overlapping.Count -gt 0) {
+        throw "Invariant 1 violation: CallerSids and ApproverSids must be disjoint. Overlapping SIDs: $($overlapping -join ', ')"
+    }
+
+    # Resolve Access Group (Invariant 3: reject broad groups like BUILTIN\Users)
     $effectiveAccessGroup = if (-not [string]::IsNullOrWhiteSpace($AccessGroup)) {
         $AccessGroup
-    } elseif ($effectiveDevMode) {
-        'BUILTIN\Users'
-    } else {
+    }
+    elseif ($effectiveDevMode) {
+        'McpBrokerServiceGroup'
+    }
+    else {
         "$($DiscoveryData.Machine.Domain)\McpBrokerCallers"
+    }
+
+    $broadGroups = @('BUILTIN\Users', 'Users', 'Domain Users', 'Authenticated Users', 'Everyone', 'Interactive')
+    if ($broadGroups -contains $effectiveAccessGroup) {
+        throw "Invariant 3 violation: accessGroup '$effectiveAccessGroup' is a broad group and is prohibited."
     }
 
     # Resolve Paths
     $effectiveInPlace = if ($PSBoundParameters.ContainsKey('InPlace')) { [bool]$InPlace } else { $effectiveDevMode }
     $effectiveDeployRoot = if (-not [string]::IsNullOrWhiteSpace($DeployRoot)) {
         $DeployRoot
-    } elseif ($effectiveInPlace) {
+    }
+    elseif ($effectiveInPlace) {
         $RepoRoot
-    } else {
+    }
+    else {
         'C:\McpBroker'
     }
 
     $effectiveTranscriptDir = if (-not [string]::IsNullOrWhiteSpace($TranscriptDir)) {
         $TranscriptDir
-    } else {
+    }
+    else {
         Join-Path $effectiveDeployRoot 'Transcripts'
     }
 
@@ -376,28 +406,28 @@ function New-BrokerPlan {
     $allowedRoots = @('C:\Shares', 'C:\Data', 'D:\Shares', 'D:\Data')
 
     $profile = [ordered]@{
-        '$schema' = 'mcp-broker-config-profile-v1'
-        mode = if ($effectiveDevMode) { 'Development' } else { 'Production' }
-        signing = [ordered]@{
-            strategy = $signingStrategy
+        '$schema'      = 'mcp-broker-config-profile-v1'
+        mode           = if ($effectiveDevMode) { 'Development' } else { 'Production' }
+        signing        = [ordered]@{
+            strategy   = $signingStrategy
             thumbprint = $targetThumbprint
-            subject = 'CN=McpBrokerDevCert'
-            certStore = 'Cert:\CurrentUser\My'
+            subject    = 'CN=McpBrokerDevCert'
+            certStore  = 'Cert:\CurrentUser\My'
         }
-        identity = [ordered]@{
-            callerSids = @($effectiveCallerSids)
-            approverSids = @($effectiveApproverSids)
+        identity       = [ordered]@{
+            callerSids              = @($effectiveCallerSids)
+            approverSids            = @($effectiveApproverSids)
             requireDistinctApprover = $effectiveRequireDistinct
-            accessGroup = $effectiveAccessGroup
+            accessGroup             = $effectiveAccessGroup
         }
-        paths = [ordered]@{
-            inPlace = [bool]$effectiveInPlace
-            deployRoot = $effectiveDeployRoot
-            transcriptDir = $effectiveTranscriptDir
+        paths          = [ordered]@{
+            inPlace        = [bool]$effectiveInPlace
+            deployRoot     = $effectiveDeployRoot
+            transcriptDir  = $effectiveTranscriptDir
             correlationLog = (Join-Path $effectiveDeployRoot 'correlation.log')
         }
         directoryRoots = $allowedRoots
-        tools = [ordered]@{
+        tools          = [ordered]@{
             revokeTools = ($revokeList | Sort-Object -Unique)
         }
     }
@@ -429,7 +459,7 @@ function Invoke-BrokerApply {
     if ($Profile.signing.strategy -eq 'CreateSelfSigned') {
         $subject = $Profile.signing.subject
         $existing = Get-ChildItem -Path 'Cert:\CurrentUser\My' -CodeSigningCert -ErrorAction SilentlyContinue |
-            Where-Object { $_.Subject -eq $subject } | Select-Object -First 1
+        Where-Object { $_.Subject -eq $subject } | Select-Object -First 1
 
         if ($existing) {
             $cert = $existing
@@ -458,35 +488,14 @@ function Invoke-BrokerApply {
         Export-Certificate -Cert $cert -FilePath $cerPath -Force | Out-Null
         Write-Log "Exported public certificate to '$cerPath'."
 
-        # If elevated, install to LocalMachine\Root and LocalMachine\TrustedPublisher
-        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-        $isAdmin = ([System.Security.Principal.WindowsPrincipal]$identity).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
-        if ($isAdmin -or $AutoTrustCert) {
-            try {
-                $lmRoot = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-                    [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-                    [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
-                $lmRoot.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                $lmRoot.Add($cert)
-                $lmRoot.Close()
-
-                $lmTp = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-                    [System.Security.Cryptography.X509Certificates.StoreName]::TrustedPublisher,
-                    [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
-                $lmTp.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                $lmTp.Add($cert)
-                $lmTp.Close()
-                Write-Log "Imported certificate into LocalMachine\Root and LocalMachine\TrustedPublisher."
-            }
-            catch {
-                Write-Log "Warning: Could not import into LocalMachine stores (requires elevation): $_"
-            }
-        }
+        # Notice: Never auto-trust or import self-signed certificates into LocalMachine\Root or
+        # LocalMachine\TrustedPublisher. Trust anchors must only be deployed via enterprise PKI or Group Policy.
+        Write-Log "Self-signed certificate is confined to CurrentUser store. System trust stores unmodified."
     }
     else {
         $thumb = $Profile.signing.thumbprint
         $cert = Get-ChildItem -Path 'Cert:\CurrentUser\My', 'Cert:\LocalMachine\My' -CodeSigningCert -ErrorAction SilentlyContinue |
-            Where-Object { $_.Thumbprint -eq $thumb } | Select-Object -First 1
+        Where-Object { $_.Thumbprint -eq $thumb } | Select-Object -First 1
         if (-not $cert) {
             throw "Configured certificate thumbprint '$thumb' not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My."
         }
@@ -495,8 +504,8 @@ function Invoke-BrokerApply {
 
     $actualThumbprint = $cert.Thumbprint
     $results['SigningCertificate'] = [pscustomobject]@{
-        Subject = $cert.Subject
-        Thumbprint = $actualThumbprint
+        Subject       = $cert.Subject
+        Thumbprint    = $actualThumbprint
         HasPrivateKey = $cert.HasPrivateKey
     }
 
@@ -535,37 +544,51 @@ function Invoke-BrokerApply {
     }
     $results['ModulesStagedPath'] = $targetModuleDir
 
-    # 4. Update policy/manifest.json
-    Write-Log "Step 4/7: Updating manifest.json..."
-    $manifest = Get-Content -LiteralPath $ManifestPath -Raw -ErrorAction Stop | ConvertFrom-Json
-    $revokeSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$Profile.tools.revokeTools, [System.StringComparer]::OrdinalIgnoreCase)
-
-    foreach ($tool in $manifest.tools) {
-        # Update server reference
-        $tool.server.signatureThumbprint = $actualThumbprint
-        $moduleFileName = "$($tool.jeaMapping.moduleName).psm1"
-        $tool.server.path = Join-Path $targetModuleDir $moduleFileName
-
-        # Update access group
-        $tool.jeaMapping.accessGroup = $Profile.identity.accessGroup
-
-        # Update revocation state
-        if ($revokeSet.Contains($tool.toolId)) {
-            $tool | Add-Member -NotePropertyName 'revoked' -NotePropertyValue $true -Force
-        } elseif ($tool.PSObject.Properties.Match('revoked').Count -gt 0) {
-            $tool.revoked = $false
+    # 4. Manifest handling: In production, manifest and sidecar are produced off-host
+    if ($Profile.mode -eq 'Production') {
+        Write-Log "Step 4/7: Verifying off-host manifest and integrity sidecar..."
+        $manifestSha256 = Get-Sha256Hex -Path $ManifestPath
+        $sidecarHash = if (Test-Path $IntegrityPath) { (Get-Content -LiteralPath $IntegrityPath -Raw).Trim() } else { '' }
+        if ([string]::IsNullOrWhiteSpace($sidecarHash) -or $sidecarHash -ne $manifestSha256) {
+            throw "Manifest integrity violation: manifest.json SHA256 ($manifestSha256) does not match manifest.json.sha256 sidecar ($sidecarHash). The sidecar must be produced off-host in a trusted release pipeline."
         }
+        $results['ManifestSha256'] = $manifestSha256
+        Write-Log "Verified off-host manifest matches integrity sidecar."
     }
+    else {
+        # DevMode: Update manifest with dev cert and access group
+        Write-Log "Step 4/7: Updating manifest.json (DevMode)..."
+        $manifest = Get-Content -LiteralPath $ManifestPath -Raw -ErrorAction Stop | ConvertFrom-Json
+        $revokeSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$Profile.tools.revokeTools, [System.StringComparer]::OrdinalIgnoreCase)
 
-    # Save manifest with clean indenting
-    $updatedManifestJson = $manifest | ConvertTo-Json -Depth 20
-    [System.IO.File]::WriteAllText($ManifestPath, $updatedManifestJson, [System.Text.Encoding]::UTF8)
+        foreach ($tool in $manifest.tools) {
+            # Update server reference
+            $tool.server.signatureThumbprint = $actualThumbprint
+            $moduleFileName = "$($tool.jeaMapping.moduleName).psm1"
+            $tool.server.path = Join-Path $targetModuleDir $moduleFileName
 
-    # 5. Compute and update manifest.json.sha256 sidecar
-    Write-Log "Step 5/7: Generating manifest integrity sidecar..."
-    $manifestSha256 = Get-Sha256Hex -Path $ManifestPath
-    [System.IO.File]::WriteAllText($IntegrityPath, $manifestSha256, [System.Text.Encoding]::ASCII)
-    $results['ManifestSha256'] = $manifestSha256
+            # Update access group
+            $tool.jeaMapping.accessGroup = $Profile.identity.accessGroup
+
+            # Update revocation state
+            if ($revokeSet.Contains($tool.toolId)) {
+                $tool | Add-Member -NotePropertyName 'revoked' -NotePropertyValue $true -Force
+            }
+            elseif ($tool.PSObject.Properties.Match('revoked').Count -gt 0) {
+                $tool.revoked = $false
+            }
+        }
+
+        # Save manifest with clean indenting
+        $updatedManifestJson = $manifest | ConvertTo-Json -Depth 20
+        [System.IO.File]::WriteAllText($ManifestPath, $updatedManifestJson, [System.Text.Encoding]::UTF8)
+
+        # 5. Compute and update manifest.json.sha256 sidecar
+        Write-Log "Step 5/7: Generating manifest integrity sidecar (DevMode)..."
+        $manifestSha256 = Get-Sha256Hex -Path $ManifestPath
+        [System.IO.File]::WriteAllText($IntegrityPath, $manifestSha256, [System.Text.Encoding]::ASCII)
+        $results['ManifestSha256'] = $manifestSha256
+    }
 
     # 6. Update src/Broker.Host/appsettings.json
     Write-Log "Step 6/7: Updating appsettings.json..."
@@ -595,7 +618,8 @@ function Invoke-BrokerApply {
 
         if ($hostDll) {
             $genOutput = & dotnet $hostDll generate-jea policy/manifest.json jea/generated 2>&1
-        } else {
+        }
+        else {
             $genOutput = & dotnet run --no-restore --project src/Broker.Host -- generate-jea policy/manifest.json jea/generated 2>&1
         }
 
@@ -726,7 +750,8 @@ function Invoke-BrokerValidate {
         finally {
             Pop-Location
         }
-    } else {
+    }
+    else {
         $checks['UnitTestsPassed'] = 'Skipped'
         # H3: Never report Healthy when tests were skipped.
         $allOk = $false
@@ -735,9 +760,9 @@ function Invoke-BrokerValidate {
     $status = if ($allOk) { 'Healthy' } else { 'ActionRequired' }
 
     return [pscustomobject]@{
-        Status = $status
+        Status    = $status
         Timestamp = (Get-Date).ToString('o')
-        Checks = [pscustomobject]$checks
+        Checks    = [pscustomobject]$checks
     }
 }
 
@@ -745,10 +770,9 @@ function Invoke-BrokerValidate {
 # RESET
 # -----------------------------------------------------------------------------
 function Reset-BrokerConfig {
-    Write-Log "Resetting manifest and appsettings to template defaults, stripping module signatures..."
+    Write-Log "Cleaning up local profile artifacts and stripping module signatures..."
     Push-Location $RepoRoot
     try {
-        $gitOutput = & git checkout HEAD -- policy/manifest.json policy/manifest.json.sha256 src/Broker.Host/appsettings.json 2>&1
         $cer = Join-Path $RepoRoot 'deploy\McpBrokerDevCert.cer'
         $prof = Join-Path $RepoRoot 'deploy\broker-profile.json'
         if (Test-Path $cer) { Remove-Item -Path $cer -Force -ErrorAction SilentlyContinue }
@@ -765,8 +789,8 @@ function Reset-BrokerConfig {
         }
 
         return [pscustomobject]@{
-            Status = if ($LASTEXITCODE -eq 0) { 'ResetComplete' } else { 'ResetFailed' }
-            ExitCode = $LASTEXITCODE
+            Status   = 'ResetComplete'
+            ExitCode = 0
         }
     }
     finally {
@@ -792,7 +816,8 @@ try {
         'Apply' {
             $profile = if (Test-Path $ProfilePath) {
                 Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
-            } else {
+            }
+            else {
                 New-BrokerPlan -IsDevMode:$DevMode
             }
             $result = Invoke-BrokerApply -Profile $profile
@@ -817,24 +842,24 @@ try {
             $val = Invoke-BrokerValidate
 
             $summary = [pscustomobject]@{
-                Pipeline = 'Full'
-                Status = $val.Status
-                Discovery = [pscustomobject]@{
-                    Machine = $discovery.Machine.Name
-                    Domain = $discovery.Machine.Domain
+                Pipeline      = 'Full'
+                Status        = $val.Status
+                Discovery     = [pscustomobject]@{
+                    Machine        = $discovery.Machine.Name
+                    Domain         = $discovery.Machine.Domain
                     IsDomainJoined = $discovery.Machine.IsDomainJoined
-                    CurrentUser = $discovery.Identity.CurrentUser
-                    CurrentSid = $discovery.Identity.CurrentSid
+                    CurrentUser    = $discovery.Identity.CurrentUser
+                    CurrentSid     = $discovery.Identity.CurrentSid
                 }
                 Configuration = [pscustomobject]@{
-                    Mode = $profile.mode
+                    Mode              = $profile.mode
                     SigningThumbprint = $applyResult.SigningCertificate.Thumbprint
-                    ActiveTools = $val.Checks.ActiveToolsCount
-                    RevokedTools = $val.Checks.RevokedToolsCount
+                    ActiveTools       = $val.Checks.ActiveToolsCount
+                    RevokedTools      = $val.Checks.RevokedToolsCount
                 }
-                Validation = $val.Checks
-                Elevation = [pscustomobject]@{
-                    IsElevated = $applyResult.IsElevated
+                Validation    = $val.Checks
+                Elevation     = [pscustomobject]@{
+                    IsElevated                = $applyResult.IsElevated
                     RequiredElevationCommands = $applyResult.RequiredElevationCommands
                 }
             }
@@ -845,8 +870,8 @@ try {
 }
 catch {
     $errObj = [pscustomobject]@{
-        Status = 'Failed'
-        Error = $_.Exception.Message
+        Status     = 'Failed'
+        Error      = $_.Exception.Message
         StackTrace = $_.ScriptStackTrace
     }
     Out-JsonResult $errObj
