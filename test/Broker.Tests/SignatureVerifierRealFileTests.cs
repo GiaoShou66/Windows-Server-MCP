@@ -171,6 +171,8 @@ public class SignatureVerifierRealFileTests
             RedirectStandardOutput = true,
             UseShellExecute = false
         };
+        // Isolate PSModulePath from parent process to avoid pollution from in-process PowerShell SDK
+        psi.EnvironmentVariables["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
 
         using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Could not start powershell.exe");
         var output = proc.StandardOutput.ReadToEnd().Trim();

@@ -91,6 +91,7 @@ public class AutoConfigurationTests : IDisposable
             UseShellExecute = false,
             WorkingDirectory = _workspaceDir
         };
+        psi.EnvironmentVariables["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
 
         foreach (var arg in arguments)
         {

@@ -21,8 +21,7 @@ function Set-BrokerScheduledTaskState {
         [string] $TaskName,
 
         [Parameter(Mandatory = $true)]
-        [ValidateSet('true', 'false')]
-        [string] $Enabled
+        [bool] $Enabled
     )
 
     Import-Module ScheduledTasks -ErrorAction Stop
@@ -31,7 +30,7 @@ function Set-BrokerScheduledTaskState {
     # error rather than letting Enable/Disable-ScheduledTask surface a vague one.
     Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop | Out-Null
 
-    if ($Enabled -eq 'true') {
+    if ($Enabled) {
         Enable-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop | Out-Null
     }
     else {

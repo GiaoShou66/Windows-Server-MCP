@@ -115,6 +115,25 @@ public sealed class WorkflowPolicies
 }
 
 /// <summary>
+/// Identifies default template placeholder values that ship in the repository.
+/// In production, these must be replaced with genuine environment credentials and certificates.
+/// </summary>
+public static class PlaceholderDiagnostics
+{
+    public const string PlaceholderThumbprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    public const string PlaceholderSid = "S-1-5-21-0000000000-0000000000-0000000000-1001";
+
+    /// <summary>Returns true if the thumbprint is non-empty and composed entirely of 'A' characters.</summary>
+    public static bool IsPlaceholderThumbprint(string? thumbprint) =>
+        !string.IsNullOrWhiteSpace(thumbprint) && thumbprint.All(c => c is 'A' or 'a');
+
+    /// <summary>Returns true if the SID matches the well-known unconfigured template SID.</summary>
+    public static bool IsPlaceholderSid(string? sid) =>
+        string.Equals(sid?.Trim(), PlaceholderSid, StringComparison.OrdinalIgnoreCase) ||
+        (sid != null && sid.StartsWith("S-1-5-21-0000000000-0000000000-0000000000", StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>
 /// Loads and hot-reloads the local tool registry. Revocation is fast (file watch,
 /// no restart); adding a tool is deliberate (restart required) — asymmetry is intentional.
 /// </summary>

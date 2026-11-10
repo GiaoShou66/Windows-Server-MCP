@@ -34,8 +34,8 @@ function Assert-ProtectedDirectory {
         if ($rule.AccessControlType -eq 'Allow' -and
             ($broadPrincipals -contains $rule.IdentityReference.Value) -and
             (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
-             ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0 -or
-             ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne 0)) {
+            ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0 -or
+            ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne 0)) {
             throw "Refusing to use ACL-writable module directory '$Path' for JEA code."
         }
     }

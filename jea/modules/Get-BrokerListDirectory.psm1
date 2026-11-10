@@ -26,19 +26,37 @@ function Get-BrokerListDirectory {
         [string] $Path
     )
 
-    $deniedPrefixes = @(
-        "$env:SystemRoot\System32\config",
-        "$env:SystemRoot\System32\drivers",
-        "$env:ProgramData\Microsoft\Crypto",
-        "$env:SystemDrive\Users"
-    )
+    # Allowlist of permitted root prefixes. In NoLanguage mode, reading arbitrary external files
+    # at runtime is blocked, so permitted roots are defined statically in the wrapper.
+    # An environment variable BROKER_ALLOWED_ROOTS can supply additional/override roots
+    # (semicolon-separated) for environment-specific deployment or testing without file reads.
+    # Reject any resolved path not under an allowed root, using canonicalized, case-insensitive
+    # prefix matching.
+    $allowedRoots = if ($env:BROKER_ALLOWED_ROOTS) {
+        $env:BROKER_ALLOWED_ROOTS -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    } else {
+        @(
+            'C:\Shares',
+            'C:\Data',
+            'D:\Shares',
+            'D:\Data'
+        )
+    }
 
-    $normalized = $Path.TrimEnd('\')
-    foreach ($prefix in $deniedPrefixes) {
-        $prefixNormalized = $prefix.TrimEnd('\')
-        if ($normalized -eq $prefixNormalized -or $normalized.StartsWith("$prefixNormalized\", [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Access to '$Path' is denied by policy (sensitive system location)."
+    # Canonicalize Path (without trailing slash for uniform prefix comparison).
+    $canonicalPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+
+    $isAllowed = $false
+    foreach ($root in $allowedRoots) {
+        $canonicalRoot = [System.IO.Path]::GetFullPath($root).TrimEnd('\')
+        if ($canonicalPath -eq $canonicalRoot -or $canonicalPath.StartsWith("$canonicalRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+            $isAllowed = $true
+            break
         }
+    }
+
+    if (-not $isAllowed) {
+        throw "Access to '$Path' is denied by policy (path is not under an allowed root)."
     }
 
     # Do not follow a junction, symlink, mount point, or other reparse point supplied

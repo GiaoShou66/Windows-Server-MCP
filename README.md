@@ -24,27 +24,43 @@ application-level check. Built because Microsoft's native MCP stack is Windows 1
 ## Call pipeline (fail-closed, fixed order)
 
 ```
-1 manifest lookup  ->  2 signature re-check  ->  3 risk tier  ->  4 parameter validate
-   ->  5 untrusted-source gate  ->  6 rate limit  ->  7 elicitation  ->  8 JEA invoke
+1 manifest lookup  ->  2 rate limit  ->  3 signature re-check  ->  3b caller taint
+   ->  4 parameter allowlist  ->  AMSI  ->  5 untrusted-source gate  ->  7 elicitation  ->  8 JEA invoke
 ```
 
-Any gate that does not explicitly allow terminates the call. The untrusted-source gate is
-a hard stop with no elicitation override: data that may carry injected content (AD
-attributes, file contents, network responses) can never reach a write/destructive tool.
+Any gate that does not explicitly allow terminates the call. Rate limiting runs
+second (before expensive Authenticode signature checks) for DoS resistance. The
+untrusted-source gate is a hard stop with no elicitation override: data that may
+carry injected content (AD attributes, file contents, network responses) can
+never reach a write/destructive tool.
 
 ## Security principles
 
-- **Read-only first** — the shipped manifest contains only query tools.
-- **Destructive = human confirm** or generate-script-don't-execute.
-- **No credentials in LLM context** — execution uses the gMSA's Kerberos identity.
-- **Prompt-injection defense** — untrusted external data never auto-triggers a write tool.
-- **Masking** — sensitive output fields (SIDs, DNs) are redacted before return.
+- **Monotonic risk tiers & human elicitation** — 49 read tools for state query,
+  13 write tools for state modification. Mutating (write-tier) tools strictly
+  require interactive human approval from a distinct approver identity
+  (`requiresElicitation: true`); approval can never be bypassed or downgraded.
+  Destructive tier remains empty / generate-script only.
+- **Rate-limit before crypto** — rate limiting runs second (before expensive
+  WinVerifyTrust checks) to protect against CPU/IO exhaustion DoS.
+- **No credentials in LLM context** — execution uses the gMSA's Kerberos identity
+  or low-privilege virtual accounts.
+- **Prompt-injection defense** — untrusted external data taints the caller and
+  never auto-triggers a mutating tool.
+- **Fail-closed masking** — sensitive output fields (SIDs, DNs) are redacted
+  before return; non-JSON payloads never leak raw unmasked data.
 
 ## Shipped tools (`policy/manifest.json`)
 
-49 tools, all read tier, no elicitation. Local tools run as a virtual account on
-`McpBroker.ReadLocal`; AD/domain tools run as the gMSA on `McpBroker.ReadDirectory` so
-queries carry real Kerberos auth. Nothing writes state — every tool is a `Get-*` cmdlet.
+62 tools total: 49 read-tier tools for inspection, and 13 write-tier tools for
+reversible administration. All 13 write-tier tools require interactive human
+elicitation from a distinct approver.
+
+Local read tools run as virtual accounts on `McpBroker.ReadLocal`; AD/domain read
+tools run as the gMSA on `McpBroker.ReadDirectory` so queries carry real Kerberos auth.
+Write tools run on `McpBroker.Write` or `McpBroker.DirectoryWrite`.
+
+### Read-Tier Tools (49)
 
 | Category | Tools |
 |---|---|
@@ -73,6 +89,27 @@ queries carry real Kerberos auth. Nothing writes state — every tool is a `Get-
 | Local accounts / groups | `list-windows-services`, `list-local-users`, `list-local-groups`, `list-local-group-members`, `list-scheduled-tasks` |
 | PS Remoting | `get-psremoting-status` |
 
+### Write-Tier Tools (13 — Human Elicitation Required)
+
+All write-tier tools are strictly bounded and reversible toggles. Every call requires
+interactive human elicitation from a distinct approver identity on the approval pipe:
+
+| Tool ID | Action & Target | Safety Boundary & Constraints |
+|---|---|---|
+| `set-scheduled-task-state` | Enable or disable a scheduled task | Reversible; task must exist; task path regex |
+| `set-windows-service-state` | Start or stop a Windows service | Reversible; fixed critical service denylist (AD DS, RPC, WinRM, broker) |
+| `set-firewall-rule-enabled` | Enable or disable a firewall rule | Reversible; rule must exist; rule name pattern |
+| `set-local-user-enabled` | Enable or disable a local user account | Reversible; RID -500 built-in Administrator denied |
+| `set-hyperv-vm-state` | Start or stop a Hyper-V VM | Reversible; VM must exist; VM name pattern |
+| `set-iis-site-state` | Start or stop an IIS website | Reversible; site must exist; site name pattern |
+| `set-cluster-node-state` | Pause or resume a failover cluster node | Reversible; node must exist; node name pattern |
+| `set-wsus-update-approval` | Approve or decline a WSUS update | Reversible; valid GUID format; approval group required |
+| `set-ad-user-enabled` | Enable or disable an Active Directory user | Reversible; RID -500 and -502 accounts denied |
+| `set-ad-computer-enabled` | Enable or disable an AD computer account | Reversible; domain controllers denied |
+| `set-ad-group-membership` | Add or remove an AD group member | Reversible; privileged groups (Domain/Enterprise Admins) denied; RID -500/-502 denied |
+| `set-gpo-status` | Set GPO status (enabled/disabled components) | Reversible; Default Domain / Domain Controller policies denied |
+| `set-dhcp-scope-state` | Activate or deactivate a DHCP scope | Reversible; valid IPv4 address format required |
+
 `list-adlds-instances` has no dedicated AD LDS enumeration cmdlet to wrap — it discovers
 instances via their `ADAM_<InstanceName>` service registration, the standard way to find
 installed AD LDS instances without binding to a specific LDAP port. `get-local-security-policy`,
@@ -88,12 +125,14 @@ Services (removed since 2016), Fax Server (FXSCOMEX COM API only), Volume Activa
 
 ### Security fixes applied during review
 
-- **`list-directory-contents` had no scope restriction.** The traversal regex (blocks any
+- **`list-directory-contents` allowlist of roots.** The traversal regex (blocks any
   `..` substring, requires a drive-absolute path) only rejects bad *syntax* — it doesn't
-  stop a syntactically valid path from pointing at `C:\Windows\System32\config` (SAM/SYSTEM
-  hive backups), `C:\ProgramData\Microsoft\Crypto` (DPAPI/machine keys), or user profile
-  folders. Added an explicit denylist of sensitive path prefixes inside the wrapper itself,
-  as defense in depth beyond what a regex can express semantically.
+  stop a syntactically valid path from pointing at sensitive locations. Replaced the
+  incomplete denylist with an explicit allowlist of permitted root prefixes (e.g.
+  `C:\Shares`, `C:\Data`), configurable via `BROKER_ALLOWED_ROOTS`. Any path not resolving
+  under an allowed root is rejected via canonicalized case-insensitive prefix matching,
+  alongside existing traversal (`..`), reparse-point (symlink/junction/mount), and
+  500-entry bounds.
 - **Unbounded AD-DS/GPO enumeration.** `Get-ADComputer -Filter *`, `Get-ADGroup -Filter *`,
   `Get-ADOrganizationalUnit -Filter *`, and `Get-GPO -All` had no result limit. In a large
   domain (tens of thousands of objects) this risks exceeding the broker's 1MiB frame cap
@@ -109,6 +148,34 @@ role** (no AD/DNS/DHCP/Hyper-V/IIS/etc. host in this environment) — unlike the
 tools, which got real PSObject-serialization and signature scrutiny. `generate-jea`
 validates the manifest/JEA-config shape only, not that each wrapped cmdlet actually
 returns what the wrapper assumes.
+
+## AI & Automated End-to-End Configuration
+
+The repository ships an AI-first auto-configuration engine (`deploy/auto-configure.ps1`) and CLI diagnostics (`Broker.Host self-check`) enabling an AI agent or orchestration tool to configure and validate the broker with zero manual guesswork.
+
+All script commands emit **pure, structured JSON** to standard output (progress logs to stderr) for direct programmatic consumption.
+
+```powershell
+# 1. Host Discovery (inspects OS, domain, current user SID, certs, installed features)
+powershell -ExecutionPolicy Bypass -File deploy\auto-configure.ps1 -Discover
+
+# 2. Plan Generation (creates tailor-made broker-profile.json for Dev or Production)
+powershell -ExecutionPolicy Bypass -File deploy\auto-configure.ps1 -Plan -DevMode
+
+# 3. Apply Configuration (signs .psm1 modules, updates manifest.json & appsettings.json, regenerates JEA)
+powershell -ExecutionPolicy Bypass -File deploy\auto-configure.ps1 -Apply -ProfilePath deploy\broker-profile.json
+
+# 4. Health Validation (verifies zero placeholders, signature validity, and self-checks)
+powershell -ExecutionPolicy Bypass -File deploy\auto-configure.ps1 -Validate
+
+# ONE-SHOT FULL AUTO-CONFIGURATION:
+powershell -ExecutionPolicy Bypass -File deploy\auto-configure.ps1 -Full -DevMode
+
+# Direct Binary Diagnostics (exits 0 if clean, 1 with JSON diagnostics if placeholders remain):
+dotnet run --no-restore --project src/Broker.Host -- self-check
+```
+
+See [`docs/ai-autoconfiguration.md`](file:///C:/Users/mingk/Desktop/windows%20server%20MCP/docs/ai-autoconfiguration.md) for complete JSON schemas, parameter contracts, and production deployment flows.
 
 ## Build
 
@@ -162,16 +229,25 @@ through `ElicitationRouter` to a second, separately ACL'd named pipe
 approver. `ConsentEngine` then rejects if the approver equals the caller or isn't allowlisted.
 Covered by `ElicitationRouterTests` and the transport integration tests.
 
-## Operator CLI
+## Operator CLI & Runtime Tools
 
+### JEA Configuration Generator
 ```powershell
 dotnet run --project src/Broker.Host -- generate-jea policy/manifest.json jea/generated
 ```
+Renders `.psrc`/`.pssc` from the manifest and exits (no pipe listener started). Enforces non-broad access groups (rejects `BUILTIN\Users`, `Everyone`, `Authenticated Users`), validates module names, and removes stale JEA configuration artifacts.
 
-Renders `.psrc`/`.pssc` from the manifest and exits (no pipe listener started). Refuses with
-a clear error if a tool is missing `jeaMapping.accessGroup` or `moduleName`, or if two tools
-on one endpoint disagree on `accessGroup`. This is the step between editing the manifest and
-running `deploy/register-jea.ps1`.
+### MCP Stdio Adapter (`Broker.McpAdapter`)
+Translates standard Model Context Protocol (MCP) JSON-RPC 2.0 stdio requests from AI host clients (Claude Desktop, Cursor, Cline) to the broker's ACL-restricted named pipe:
+```powershell
+dotnet run --project src/Broker.McpAdapter -- --pipe McpBroker --manifest policy/manifest.json
+```
+
+### Standalone Approver CLI (`Broker.ApproverCli`)
+Connects to the separate approval pipe (`\\.\pipe\McpBroker.Approvals`) under an authorized human operator identity. Displays pending tool requests, parameter values, caller SID, and expiry, allowing interactive human authorization (`[y/N]`) for write-tier operations:
+```powershell
+dotnet run --project src/Broker.ApproverCli -- --pipe McpBroker.Approvals
+```
 
 ## Testing
 

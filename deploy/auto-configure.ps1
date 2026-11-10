@@ -73,6 +73,9 @@ param(
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if (-not (Get-PSDrive -Name Cert -ErrorAction SilentlyContinue)) {
+    try { New-PSDrive -Name Cert -PSProvider Certificate -Root '\' -Scope Global -ErrorAction SilentlyContinue | Out-Null } catch { }
+}
 
 # Resolve repository root
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
@@ -149,13 +152,28 @@ function Get-BrokerDiscovery {
     $certLocations = @('Cert:\CurrentUser\My', 'Cert:\LocalMachine\My')
     foreach ($loc in $certLocations) {
         if (Test-Path $loc) {
-            Get-ChildItem -Path $loc -CodeSigningCert -ErrorAction SilentlyContinue | ForEach-Object {
-                $certs += [pscustomobject]@{
-                    Subject       = $_.Subject
-                    Thumbprint    = $_.Thumbprint
-                    StoreLocation = $loc
-                    NotAfter      = $_.NotAfter.ToString('o')
-                    HasPrivateKey = $_.HasPrivateKey
+            foreach ($c in (Get-ChildItem -Path $loc -ErrorAction SilentlyContinue)) {
+                $isCodeSigning = $false
+                try {
+                    foreach ($ext in $c.Extensions) {
+                        if ($ext -and $ext.Oid -and $ext.Oid.Value -eq '2.5.29.37') {
+                            if ($ext.Format($false) -match 'Code Signing' -or $ext.Format($true) -match '1.3.6.1.5.5.7.3.3') {
+                                $isCodeSigning = $true
+                                break
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                if ($isCodeSigning) {
+                    $certs += [pscustomobject]@{
+                        Subject       = $c.Subject
+                        Thumbprint    = $c.Thumbprint
+                        StoreLocation = $loc
+                        NotAfter      = $c.NotAfter.ToString('o')
+                        HasPrivateKey = $c.HasPrivateKey
+                    }
                 }
             }
         }
@@ -457,9 +475,12 @@ function Invoke-BrokerApply {
     $cerPath = Join-Path $RepoRoot 'deploy\McpBrokerDevCert.cer'
     $cert = $null
     if ($Profile.signing.strategy -eq 'CreateSelfSigned') {
+        if (-not (Get-PSDrive -Name Cert -ErrorAction SilentlyContinue)) {
+            try { New-PSDrive -Name Cert -PSProvider Certificate -Root '\' -Scope Global -ErrorAction SilentlyContinue | Out-Null } catch { }
+        }
         $subject = $Profile.signing.subject
-        $existing = Get-ChildItem -Path 'Cert:\CurrentUser\My' -CodeSigningCert -ErrorAction SilentlyContinue |
-        Where-Object { $_.Subject -eq $subject } | Select-Object -First 1
+        $existing = Get-ChildItem -Path 'Cert:\CurrentUser\My' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Subject -eq $subject } | Select-Object -First 1
 
         if ($existing) {
             $cert = $existing
@@ -467,7 +488,13 @@ function Invoke-BrokerApply {
         }
         else {
             Write-Log "Generating new self-signed code signing certificate '$subject'..."
-            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $subject -CertStoreLocation 'Cert:\CurrentUser\My' -NotAfter (Get-Date).AddYears(5)
+            Push-Location 'Cert:\CurrentUser\My'
+            try {
+                $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $subject -NotAfter (Get-Date).AddYears(5)
+            }
+            finally {
+                Pop-Location
+            }
             Write-Log "Created certificate with thumbprint $($cert.Thumbprint)."
         }
 
@@ -494,8 +521,8 @@ function Invoke-BrokerApply {
     }
     else {
         $thumb = $Profile.signing.thumbprint
-        $cert = Get-ChildItem -Path 'Cert:\CurrentUser\My', 'Cert:\LocalMachine\My' -CodeSigningCert -ErrorAction SilentlyContinue |
-        Where-Object { $_.Thumbprint -eq $thumb } | Select-Object -First 1
+        $cert = Get-ChildItem -Path 'Cert:\CurrentUser\My', 'Cert:\LocalMachine\My' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Thumbprint -eq $thumb } | Select-Object -First 1
         if (-not $cert) {
             throw "Configured certificate thumbprint '$thumb' not found in Cert:\CurrentUser\My or Cert:\LocalMachine\My."
         }

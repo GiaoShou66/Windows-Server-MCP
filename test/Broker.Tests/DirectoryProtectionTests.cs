@@ -64,3 +64,4 @@ public class DirectoryProtectionTests : IDisposable
         try { Directory.Delete(_testDir, recursive: true); } catch { }
     }
 }
+
