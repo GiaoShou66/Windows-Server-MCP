@@ -83,7 +83,47 @@ if (args.Length > 0 && string.Equals(args[0], "self-check", StringComparison.Ord
         var activeTools = store.All.Where(t => !t.Revoked).ToList();
         var revokedTools = store.All.Where(t => t.Revoked).ToList();
 
-        if (placeholdersOk)
+        bool dirsOk = true;
+        var transcriptDir = config["Jea:TranscriptDir"] ?? @"C:\McpBroker\Transcripts";
+        try
+        {
+            Broker.Core.DirectoryProtection.VerifyProtected(transcriptDir);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError("Transcript directory verification failed: {Msg}", ex.Message);
+            dirsOk = false;
+        }
+
+        var corrLog = config["Audit:CorrelationLogPath"] ?? @"C:\McpBroker\correlation.log";
+        var corrDir = Path.GetDirectoryName(Path.GetFullPath(corrLog));
+        if (!string.IsNullOrEmpty(corrDir))
+        {
+            try
+            {
+                Broker.Core.DirectoryProtection.VerifyProtected(corrDir);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError("Correlation log directory verification failed: {Msg}", ex.Message);
+                dirsOk = false;
+            }
+        }
+
+        var verifier = new Broker.Registry.SignatureVerifier(loggerFactory.CreateLogger<Broker.Registry.SignatureVerifier>());
+        bool signaturesOk = true;
+        foreach (var tool in activeTools)
+        {
+            if (!verifier.Verify(tool))
+            {
+                logger.LogError("Self-check: signature invalid or untrusted for tool {Tool}", tool.ToolId);
+                signaturesOk = false;
+            }
+        }
+
+        bool allOk = placeholdersOk && dirsOk && signaturesOk;
+
+        if (allOk)
         {
             Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
             {
@@ -92,7 +132,7 @@ if (args.Length > 0 && string.Equals(args[0], "self-check", StringComparison.Ord
                 totalTools = store.All.Count,
                 activeTools = activeTools.Count,
                 revokedTools = revokedTools.Count,
-                message = "Broker configuration self-check passed. No placeholder credentials or thumbprints detected."
+                message = "Broker configuration self-check passed. Valid signatures, verified ACLs, and zero placeholder credentials."
             }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
             return 0;
         }
@@ -105,7 +145,7 @@ if (args.Length > 0 && string.Equals(args[0], "self-check", StringComparison.Ord
                 totalTools = store.All.Count,
                 activeTools = activeTools.Count,
                 revokedTools = revokedTools.Count,
-                message = "Broker configuration self-check failed due to unconfigured placeholders. See logs."
+                message = "Broker configuration self-check failed due to unconfigured placeholders, invalid signatures, or broad ACLs. See logs."
             }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
             return 1;
         }

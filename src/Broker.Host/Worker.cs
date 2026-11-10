@@ -96,6 +96,17 @@ public sealed class Worker : BackgroundService
             ok = false;
         }
 
+        // Invariant 1: Caller SIDs and approver SIDs are disjoint. The broker refuses to start otherwise.
+        var overlappingSids = allowedSids
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Intersect(approverSids.Where(s => !string.IsNullOrWhiteSpace(s)), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (overlappingSids.Count > 0)
+        {
+            logger.LogError("Invariant 1 violation: Caller SIDs and approver SIDs must be disjoint. The broker refuses to start otherwise. Overlapping SIDs: {Overlaps}", string.Join(", ", overlappingSids));
+            ok = false;
+        }
+
         foreach (var tool in tools)
         {
             if (tool.Revoked) continue;
