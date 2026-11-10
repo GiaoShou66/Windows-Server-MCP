@@ -33,9 +33,26 @@
 - Keep `VisibleExternalCommands` empty unless a specific wrapper requires an explicitly
   reviewed executable.
 - Use gMSA only for tools that require domain/network identity.
+- For local JEA session configurations (`McpBroker.ReadLocal` and `McpBroker.Write`),
+  configure explicit least-privilege `RunAsVirtualAccountGroups` rather than Administrator:
+  - `McpBroker.ReadLocal`: `Event Log Readers`, `Performance Monitor Users`
+  - `McpBroker.Write`: `Hyper-V Administrators`, `Network Configuration Operators`
 - Verify effective role definitions and run-as identity with a low-privilege test account.
 - Test prohibited commands and alternate parameter forms, not only successful calls.
 - Do not provide an arbitrary PowerShell or script execution tool.
+
+## Untrusted Host Metadata and Prompt Injection Defense
+
+- Free-text read tools (e.g. `list-scheduled-tasks`, `list-windows-services`, `list-printers`,
+  `list-hyper-v-vms`, `list-smb-shares`, `list-local-users`, `list-local-groups`) return host
+  metadata such as task descriptions, service display names, and comments that can be set by
+  unprivileged or compromised local users.
+- In `policy/manifest.json`, all such tools are tagged with:
+  `"untrustedInputSources": ["host-metadata"]`.
+- MCP clients and AI agent runtimes MUST NOT concatenate these fields raw into LLM prompt contexts
+  without escaping or isolating them in XML/markdown delimiters (e.g. `<untrusted_host_data>`).
+- Broker clients must treat all free-text fields returned by read tools as untrusted text rather
+  than system instructions.
 
 ## Approval and operations
 
