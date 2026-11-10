@@ -25,6 +25,14 @@ public sealed class JeaConfigGenerator
     public IReadOnlyList<string> GenerateAll(IEnumerable<ToolManifest> tools)
     {
         Directory.CreateDirectory(_outputDir);
+
+        // M4: Delete stale .psrc and .pssc files before writing new ones so removed/renamed
+        // tools do not leave lingering JEA configurations in the generated directory.
+        foreach (var existing in Directory.GetFiles(_outputDir, "*.psrc").Concat(Directory.GetFiles(_outputDir, "*.pssc")))
+        {
+            try { File.Delete(existing); } catch { }
+        }
+
         var written = new List<string>();
         var byEndpoint = new Dictionary<string, List<ToolManifest>>(StringComparer.Ordinal);
 
@@ -123,6 +131,8 @@ public sealed class JeaConfigGenerator
             throw new InvalidOperationException(
                 $"Endpoint {endpointName}: tools disagree on accessGroup ({string.Join(", ", accessGroups)}). One endpoint, one group.");
 
+        ValidateAccessGroupNotBroad(endpointName, accessGroups[0]);
+
         var roleCapabilities = string.Join(", ", tools
             .Select(t => t.JeaMapping.RoleCapabilityName)
             .Distinct(StringComparer.Ordinal)
@@ -196,6 +206,41 @@ public sealed class JeaConfigGenerator
         var groupsClause = $"\n            RunAsVirtualAccountGroups = @({string.Join(", ", groups.Select(g => $"'{Escape(g)}'"))})";
 
         return $"RunAsVirtualAccount = $true{groupsClause}";
+    }
+
+    private static void ValidateAccessGroupNotBroad(string endpointName, string group)
+    {
+        var normalized = group.Trim();
+        var simpleName = normalized.Contains('\\') ? normalized.Substring(normalized.LastIndexOf('\\') + 1) : normalized;
+
+        var disallowedSimpleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Users", "Domain Users", "Authenticated Users", "Everyone", "Interactive"
+        };
+
+        var disallowedFullNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "BUILTIN\\Users",
+            "Users",
+            "Domain Users",
+            "Authenticated Users",
+            "NT AUTHORITY\\Authenticated Users",
+            "Everyone",
+            "BUILTIN\\Everyone",
+            "Interactive",
+            "NT AUTHORITY\\Interactive",
+            "S-1-1-0",
+            "S-1-5-11",
+            "S-1-5-4",
+            "S-1-5-32-545"
+        };
+
+        if (disallowedSimpleNames.Contains(simpleName) || disallowedFullNames.Contains(normalized))
+        {
+            throw new InvalidOperationException(
+                $"Endpoint {endpointName}: accessGroup '{group}' is a broad principal and cannot be used in RoleDefinitions. " +
+                "Invariant 3 mandates that JEA RoleDefinitions grant ONLY a dedicated service group whose sole member is the broker service account.");
+        }
     }
 
     private static string Escape(string s) => s.Replace("'", "''");

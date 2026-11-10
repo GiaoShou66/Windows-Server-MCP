@@ -19,7 +19,8 @@ public sealed class JeaConfigGeneratorTests : IDisposable
 
     private static ToolManifest Tool(
         string id, string endpoint, string roleCap, string cmdlet, string moduleName, string accessGroup,
-        bool useGmsa = false, string? gmsa = null, List<ToolParameter>? parameters = null) => new()
+        bool useGmsa = false, string? gmsa = null, List<ToolParameter>? parameters = null,
+        List<string>? virtualAccountGroups = null) => new()
     {
         ToolId = id,
         Description = $"desc-{id}",
@@ -31,7 +32,8 @@ public sealed class JeaConfigGeneratorTests : IDisposable
             ModuleName = moduleName,
             AccessGroup = accessGroup,
             UseGmsa = useGmsa,
-            GmsaAccount = gmsa
+            GmsaAccount = gmsa,
+            VirtualAccountGroups = virtualAccountGroups ?? new List<string>()
         },
         Parameters = parameters ?? new()
     };
@@ -196,6 +198,40 @@ public sealed class JeaConfigGeneratorTests : IDisposable
         var psrc = File.ReadAllText(Path.Combine(_outDir, "rc1.psrc"));
 
         Assert.Contains("VisibleExternalCommands = @('secedit.exe', 'auditpol.exe')", psrc);
+    }
+
+    [Theory]
+    [InlineData("BUILTIN\\Users")]
+    [InlineData("Users")]
+    [InlineData("Domain Users")]
+    [InlineData("CONTOSO\\Domain Users")]
+    [InlineData("Authenticated Users")]
+    [InlineData("NT AUTHORITY\\Authenticated Users")]
+    [InlineData("Everyone")]
+    [InlineData("Interactive")]
+    [InlineData("NT AUTHORITY\\Interactive")]
+    public void RejectBroadAccessGroupsAtGenerationTime(string broadGroup)
+    {
+        var tool = Tool("t1", "ep.read", "rc1", "Get-A", "Get-A", accessGroup: broadGroup);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => new JeaConfigGenerator(_outDir).GenerateAll([tool]));
+        Assert.Contains("broad principal", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeletesStalePsrcAndPsscFiles()
+    {
+        Directory.CreateDirectory(_outDir);
+        var stalePsrc = Path.Combine(_outDir, "stale-tool.psrc");
+        var stalePssc = Path.Combine(_outDir, "stale-endpoint.pssc");
+        File.WriteAllText(stalePsrc, "stale");
+        File.WriteAllText(stalePssc, "stale");
+
+        var tool = Tool("t1", "ep.read", "rc1", "Get-A", "Get-A", accessGroup: "CONTOSO\\McpBrokerSvcGroup");
+        new JeaConfigGenerator(_outDir).GenerateAll([tool]);
+
+        Assert.False(File.Exists(stalePsrc), "Stale .psrc was not deleted");
+        Assert.False(File.Exists(stalePssc), "Stale .pssc was not deleted");
     }
 
     public void Dispose()

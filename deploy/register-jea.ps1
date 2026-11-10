@@ -52,6 +52,16 @@ Assert-ProtectedDirectory -Path $SystemModulesRoot
 # Role capabilities must live under <Module>\RoleCapabilities\*.psrc to be resolvable.
 $rcDir = Join-Path $ModuleRoot 'RoleCapabilities'
 New-Item -ItemType Directory -Path $rcDir -Force | Out-Null
+
+# Clean obsolete .psrc files from McpBrokerRoles that are not in current manifest/GeneratedDir
+$currentPsrcs = @(Get-ChildItem -Path $GeneratedDir -Filter '*.psrc' | ForEach-Object { $_.Name })
+Get-ChildItem -Path $rcDir -Filter '*.psrc' -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($currentPsrcs -notcontains $_.Name) {
+        Write-Host "Removing obsolete role capability: $($_.Name)"
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Copy-Item -Path (Join-Path $GeneratedDir '*.psrc') -Destination $rcDir -Force
 
 # A module manifest so PowerShell treats McpBrokerRoles as a module.
@@ -83,6 +93,16 @@ if (Test-Path $ModulesSourceDir) {
 }
 else {
     Write-Warning "ModulesSourceDir '$ModulesSourceDir' not found; wrapper modules not installed."
+}
+
+$currentEndpoints = @(Get-ChildItem -Path $GeneratedDir -Filter '*.pssc' | ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension($_.Name) })
+
+# Unregister any existing McpBroker.* endpoint not in the current manifest
+Get-PSSessionConfiguration -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'McpBroker.*' } | ForEach-Object {
+    if ($currentEndpoints -notcontains $_.Name) {
+        Write-Host "Unregistering obsolete JEA endpoint: $($_.Name)"
+        Unregister-PSSessionConfiguration -Name $_.Name -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Get-ChildItem -Path $GeneratedDir -Filter '*.pssc' | ForEach-Object {
