@@ -41,12 +41,57 @@ function Set-BrokerAdGroupMembership {
 
     Import-Module ActiveDirectory -ErrorAction Stop
 
-    # Resolve by explicit name/SamAccountName so a caller cannot pass a group SID
-    # (e.g. S-1-5-32-544 = Administrators) or a DN and slip past the name denylist.
-    $group = Get-ADGroup -Filter 'Name -eq $GroupName' -Properties ObjectGuid, SID -ErrorAction Stop |
-        Select-Object -First 1
+    # Resolve the group by exact identity without building an LDAP filter string from
+    # user input. Get-ADGroup -Identity resolves by exact SamAccountName, Name, SID, GUID, or DN.
+    $group = try {
+        Get-ADGroup -Identity $GroupName -Properties ObjectGuid, SID, Name, SamAccountName, adminCount, MemberOf -ErrorAction Stop
+    }
+    catch {
+        throw "Group '$GroupName' not found."
+    }
     if (-not $group) {
         throw "Group '$GroupName' not found."
+    }
+
+    # H4: Deny by well-known privileged RIDs and Built-in SIDs
+    $deniedRidsPattern = '-(512|516|518|519|520|498|521)$'
+    $deniedBuiltinSids = @(
+        'S-1-5-32-544',
+        'S-1-5-32-548',
+        'S-1-5-32-549',
+        'S-1-5-32-550',
+        'S-1-5-32-551'
+    )
+
+    $groupSid = $group.SID.Value
+    if ($groupSid -match $deniedRidsPattern -or $deniedBuiltinSids -contains $groupSid) {
+        throw "Membership changes to group '$GroupName' are denied by policy (privileged group SID: $groupSid)."
+    }
+
+    # H4: Deny by adminCount = 1 (Active Directory AdminSDHolder / SDProp protected object)
+    if ($group.PSObject.Properties['adminCount'] -and ($group.adminCount -as [int]) -eq 1) {
+        throw "Membership changes to group '$GroupName' are denied by policy (adminCount=1 protected group)."
+    }
+
+    # Defense-in-depth: re-verify resolved group Name and SamAccountName against the denylist
+    if ($deniedGroups -contains $group.Name -or $deniedGroups -contains $group.SamAccountName) {
+        throw "Membership changes to group '$GroupName' are denied by policy (privileged group)."
+    }
+
+    # H4: Transitive nesting check into protected groups
+    if ($group.MemberOf -and $group.MemberOf.Count -gt 0) {
+        foreach ($parentDn in $group.MemberOf) {
+            $parentGroup = Get-ADGroup -Identity $parentDn -Properties ObjectGuid, SID, Name, SamAccountName, adminCount -ErrorAction SilentlyContinue
+            if ($parentGroup) {
+                $pSid = $parentGroup.SID.Value
+                if ($pSid -match $deniedRidsPattern -or
+                    $deniedBuiltinSids -contains $pSid -or
+                    $deniedGroups -contains $parentGroup.Name -or
+                    ($parentGroup.PSObject.Properties['adminCount'] -and ($parentGroup.adminCount -as [int]) -eq 1)) {
+                    throw "Membership changes to group '$GroupName' are denied by policy (transitively nested in protected group '$($parentGroup.Name)')."
+                }
+            }
+        }
     }
 
     $member = Get-ADUser -SamAccountName $MemberSamAccountName -Properties SamAccountName, ObjectGuid, SID -ErrorAction Stop

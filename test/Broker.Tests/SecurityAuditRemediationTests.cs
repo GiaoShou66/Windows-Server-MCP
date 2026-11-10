@@ -291,6 +291,100 @@ public class SetBrokerAdGroupMembershipTests
         var ex = Assert.ThrowsAny<Exception>(() => ps.Invoke());
         Assert.DoesNotContain("are denied by policy (privileged group)", ex.Message);
     }
+
+    [Theory]
+    [InlineData("RenamedDomainAdmins", "S-1-5-21-99999-512", 0, "privileged group SID")]
+    [InlineData("RenamedBuiltinAdmins", "S-1-5-32-544", 0, "privileged group SID")]
+    [InlineData("AdminSdHolderProtectedGroup", "S-1-5-21-99999-1234", 1, "adminCount=1 protected group")]
+    public void PrivilegedGroupSidsAndAdminCountAreDenied(string name, string sid, int adminCount, string expectedMsg)
+    {
+        var code = File.ReadAllText(_modulePath);
+        code = code.Replace("Import-Module ActiveDirectory -ErrorAction Stop", "");
+        code = code.Replace("Get-ADGroup -Identity $GroupName -Properties ObjectGuid, SID, Name, SamAccountName, adminCount, MemberOf -ErrorAction Stop",
+            $"[pscustomobject]@{{ Name = '{name}'; SamAccountName = '{name}'; ObjectGuid = [guid]::NewGuid(); SID = [pscustomobject]@{{ Value = '{sid}' }}; adminCount = {adminCount}; MemberOf = @() }}");
+        code = code.Replace("Export-ModuleMember -Function Set-BrokerAdGroupMembership", "");
+
+        using var ps = ListDirectoryContentsTests.CreateTestPowerShell();
+        ps.AddScript(code + $"\nSet-BrokerAdGroupMembership -GroupName '{name}' -MemberSamAccountName 'testuser' -Action Add");
+        var ex = Assert.ThrowsAny<Exception>(() => ps.Invoke());
+        Assert.Contains(expectedMsg, ex.Message);
+    }
+}
+
+/// <summary>
+/// Unit tests for H4: Wrapper security boundaries (GPO, Local User, WSUS).
+/// </summary>
+public class WrapperSecurityBoundariesTests
+{
+    private static readonly string RepoRoot = ListDirectoryContentsTests.GetRepoRoot();
+
+    [Theory]
+    [InlineData("Default Domain Policy")]
+    [InlineData("Default Domain Controllers Policy")]
+    public void SetBrokerGpoStatusDeniesDefaultPoliciesByName(string defaultGpo)
+    {
+        var modulePath = Path.Combine(RepoRoot, "jea", "modules", "Set-BrokerGpoStatus.psm1");
+        using var ps = ListDirectoryContentsTests.CreateTestPowerShell();
+        ps.AddScript($"Import-Module '{modulePath.Replace("'", "''")}'; Set-BrokerGpoStatus -GpoName '{defaultGpo}' -Status 'AllSettingsDisabled'");
+        var ex = Assert.Throws<RuntimeException>(() => ps.Invoke());
+        Assert.Contains("are denied by policy", ex.Message);
+    }
+
+    [Fact]
+    public void SetBrokerGpoStatusDeniesDefaultPolicyByGuid()
+    {
+        var modulePath = Path.Combine(RepoRoot, "jea", "modules", "Set-BrokerGpoStatus.psm1");
+        var code = File.ReadAllText(modulePath);
+        code = code.Replace("Import-Module GroupPolicy -ErrorAction Stop", "");
+        code = code.Replace("Get-GPO -Name $GpoName -ErrorAction Stop", "[pscustomobject]@{ Id = [guid]'31b2f340-016d-11d2-945f-00c04fb984f9'; DisplayName = 'Renamed Default Policy' }");
+        code = code.Replace("Export-ModuleMember -Function Set-BrokerGpoStatus", "");
+
+        using var ps = ListDirectoryContentsTests.CreateTestPowerShell();
+        ps.AddScript(code + "\nSet-BrokerGpoStatus -GpoName 'Renamed Default Policy' -Status 'AllSettingsDisabled'");
+        var ex = Assert.ThrowsAny<Exception>(() => ps.Invoke());
+        Assert.Contains("protected GPO GUID", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("Administrator")]
+    [InlineData("Guest")]
+    [InlineData("DefaultAccount")]
+    public void SetBrokerLocalUserEnabledDeniesBuiltinNames(string name)
+    {
+        var modulePath = Path.Combine(RepoRoot, "jea", "modules", "Set-BrokerLocalUserEnabled.psm1");
+        using var ps = ListDirectoryContentsTests.CreateTestPowerShell();
+        ps.AddScript($"Import-Module '{modulePath.Replace("'", "''")}'; Set-BrokerLocalUserEnabled -UserName '{name}' -Enabled 'false'");
+        var ex = Assert.Throws<RuntimeException>(() => ps.Invoke());
+        Assert.Contains("denied by policy (built-in account)", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("RenamedAdmin", "S-1-5-21-99999-500")]
+    [InlineData("RenamedGuest", "S-1-5-21-99999-501")]
+    [InlineData("RenamedDefault", "S-1-5-21-99999-503")]
+    public void SetBrokerLocalUserEnabledDeniesBuiltinRidsRegardlessOfName(string name, string sid)
+    {
+        var modulePath = Path.Combine(RepoRoot, "jea", "modules", "Set-BrokerLocalUserEnabled.psm1");
+        var code = File.ReadAllText(modulePath);
+        code = code.Replace("Import-Module Microsoft.PowerShell.LocalAccounts -ErrorAction Stop", "");
+        code = code.Replace("$user = Get-LocalUser -Name $UserName -ErrorAction Stop", $"$user = [pscustomobject]@{{ Name = '{name}'; SID = [pscustomobject]@{{ Value = '{sid}' }}; Enabled = $true }}");
+        code = code.Replace("Export-ModuleMember -Function Set-BrokerLocalUserEnabled", "");
+
+        using var ps = ListDirectoryContentsTests.CreateTestPowerShell();
+        ps.AddScript(code + $"\nSet-BrokerLocalUserEnabled -UserName '{name}' -Enabled 'false'");
+        var ex = Assert.ThrowsAny<Exception>(() => ps.Invoke());
+        Assert.Contains("denied by policy (built-in account SID", ex.Message);
+    }
+
+    [Fact]
+    public void SetBrokerWsusUpdateApprovalDeniesAllComputersTargetGroup()
+    {
+        var modulePath = Path.Combine(RepoRoot, "jea", "modules", "Set-BrokerWsusUpdateApproval.psm1");
+        using var ps = ListDirectoryContentsTests.CreateTestPowerShell();
+        ps.AddScript($"Import-Module '{modulePath.Replace("'", "''")}'; Set-BrokerWsusUpdateApproval -UpdateId '11111111-2222-3333-4444-555555555555' -TargetGroup 'All Computers' -Action 'Approve'");
+        var ex = Assert.Throws<RuntimeException>(() => ps.Invoke());
+        Assert.Contains("Approval to target group 'All Computers' is denied by policy", ex.Message);
+    }
 }
 
 /// <summary>

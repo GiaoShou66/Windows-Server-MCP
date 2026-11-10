@@ -27,7 +27,14 @@ function Set-BrokerLocalUserEnabled {
 
     Import-Module Microsoft.PowerShell.LocalAccounts -ErrorAction Stop
 
-    Get-LocalUser -Name $UserName -ErrorAction Stop | Out-Null
+    $user = Get-LocalUser -Name $UserName -ErrorAction Stop
+    $sidStr = $user.SID.Value
+
+    # H4: Deny well-known built-in accounts by SID RID (-500 Administrator, -501 Guest, -503 DefaultAccount)
+    # This prevents renaming Administrator/Guest to bypass the name-based denylist.
+    if ($sidStr -match '-(500|501|503)$') {
+        throw "Action on local user '$UserName' is denied by policy (built-in account SID: $sidStr)."
+    }
 
     if ($Enabled -eq 'true') {
         Enable-LocalUser -Name $UserName -ErrorAction Stop
