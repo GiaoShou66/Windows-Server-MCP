@@ -16,6 +16,8 @@
     <ProjectReference Include="..\..\src\Broker.Audit\Broker.Audit.csproj" />
     <ProjectReference Include="..\..\src\Broker.JeaExecution\Broker.JeaExecution.csproj" />
     <ProjectReference Include="..\..\src\Broker.Host\Broker.Host.csproj" />
+    <ProjectReference Include="..\..\src\Broker.McpAdapter\Broker.McpAdapter.csproj" />
+    <ProjectReference Include="..\..\src\Broker.ApproverCli\Broker.ApproverCli.csproj" />
   </ItemGroup>
 
   <ItemGroup>
