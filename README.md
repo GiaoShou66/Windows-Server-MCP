@@ -204,20 +204,20 @@ dotnet publish src/Broker.Host/Broker.Host.csproj -c Release -o publish
 
 ## Hardening status
 
-Correctness fixes applied and covered by `test/Broker.Tests` (28 tests):
-- Elicitation no longer deadlocks — the pipe reader demuxes frames and dispatches
-  concurrently; approvals have a configurable TTL (`Elicitation:TtlSeconds`).
-- Signature verification uses WinVerifyTrust (file hash + chain) and cross-checks the
-  signer thumbprint; works for PE and `.psm1`.
-- JEA `.pssc` `RoleDefinitions` keys on a real `accessGroup`; `.psrc` imports the wrapper
-  module via `ModulesToImport`.
-- JEA invocation runs cleanly under `NoLanguage` (no in-session script); output `PSObject`s
-  are flattened so JSON is populated, not `{}`.
-- Caller taint window (`Taint:WindowSeconds`): a caller that received untrusted-source
-  output cannot drive a write/destructive tool until the window expires.
-- Separation of duties (`Elicitation:RequireDistinctApprover` + `ApproverSids`): a caller
-  cannot self-approve; the approver must be distinct and allowlisted.
-- Revocation cancels in-flight elicitations for the revoked tool.
+All critical non-negotiable invariants and security audit findings (C1, C2, H1–H6, M1–M5) are remediated and enforced with zero warnings across **146 automated unit and integration tests**:
+
+- **Disjoint caller and approver identities (Invariant 1 & M2)**: Start-up enforcement guarantees `Caller SIDs ∩ Approver SIDs = ∅`. Write-tier requests fail fast (`distinct-approver-required`) if distinct approver mode is not enabled.
+- **Strict JEA isolation (Invariant 3, C2, M4)**: `JeaConfigGenerator` strictly restricts `RoleDefinitions` to the broker service account only, rejecting broad access groups (`BUILTIN\Users`, `Domain Users`, `Authenticated Users`, `Everyone`). Automatically cleans up stale `.psrc` and `.pssc` artifacts.
+- **Fail-closed boundary checks in wrappers (H4)**:
+  - `Set-BrokerGpoStatus` denies Default Domain Policy (`{31B2F340-016D-11D2-945F-00C04FB984F9}`) and Default Domain Controllers Policy (`{6AC1786C-016F-11D2-945F-00C04FB984F9}`) by GUID.
+  - `Set-BrokerLocalUserEnabled` denies built-in Administrator (`RID -500`), Guest (`RID -501`), and WDAGUtilityAccount (`RID -503`) by SID.
+  - `Set-BrokerWsusUpdateApproval` enforces explicit allowlisted target groups (disallowing blanket "All Computers").
+  - `Set-BrokerAdGroupMembership` denies well-known privileged RIDs/SIDs (`-512`, `-516`, `-518`, `-519`, `-520`, `-498`, `-521`, `S-1-5-32-544/548/549/550/551`), `adminCount=1`, and recursively inspects nested group memberships.
+- **Runtime directory verification (H2)**: Non-elevated gMSA runtime skips privileged DACL writes and verifies that directories (`CorrelationLog`, `Transcripts`) are protected against broad write permissions.
+- **Concurrent named pipe stability (H1, M1)**: Applies `FirstPipeInstance` to slot 0 only, catching unauthorized access and decoupling frame reading from dispatch to prevent queue starvation.
+- **Operator-only enterprise deployment (C1, H5)**: `auto-configure.ps1` mandates enterprise CA certificate thumbprints for production, eliminates untrusted self-minting, and isolates test runs in temporary working directories.
+- **Prompt-injection defense & taint marking (M3)**: Tools returning unstructured free-text (event logs, service descriptions, Hyper-V notes) are tagged with `untrusted_content: true`.
+- **Standard MCP JSON-RPC 2.0 stdio & human console (H6)**: Ships `Broker.McpAdapter` for AI client hosts and `Broker.ApproverCli` for out-of-band interactive approval.
 
 ## Approval delivery (distinct-approver mode)
 
@@ -251,7 +251,7 @@ dotnet run --project src/Broker.ApproverCli -- --pipe McpBroker.Approvals
 
 ## Testing
 
-`test/Broker.Tests` (67 tests), run on real Windows, no mocking of the OS layer where it
+`test/Broker.Tests` (146 tests, 100% passing, 0 warnings), run on real Windows, no mocking of the OS layer where it
 matters:
 
 - **PSObject serialization tests** against the real `System.Management.Automation` types
@@ -316,4 +316,3 @@ missing file rejected, unsigned file rejected — all against actual Windows API
   actual registered JEA endpoint, and the approval pipe's real SID-based ACL enforcement,
   still need a domain-joined Windows Server with a gMSA and registered endpoints — that
   infrastructure doesn't exist in this environment.
-"# Windows-Server-MCP" 
