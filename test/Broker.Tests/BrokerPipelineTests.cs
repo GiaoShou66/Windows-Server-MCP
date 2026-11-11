@@ -99,6 +99,33 @@ public sealed class BrokerPipelineTests : IDisposable
                     parameters = Array.Empty<object>(),
                     untrustedInputSources = Array.Empty<string>(),
                     maskedFields = Array.Empty<string>()
+                },
+                new
+                {
+                    toolId = "destructive-tool",
+                    displayName = "Destructive Tool",
+                    server = new { serverId = "s6", path = @"C:\fake\s6.psm1", signatureThumbprint = new string('A', 40) },
+                    riskTier = "destructive",
+                    requiresElicitation = true,
+                    jeaMapping = new { endpointName = "ep.destructive", roleCapabilityName = "rc.destructive", cmdlet = "Remove-Thing", moduleName = "Remove-Thing", accessGroup = "G" },
+                    parameters = Array.Empty<object>(),
+                    untrustedInputSources = Array.Empty<string>(),
+                    maskedFields = Array.Empty<string>()
+                },
+                new
+                {
+                    toolId = "int-param-tool",
+                    displayName = "Read Tool With Int Parameter",
+                    server = new { serverId = "s7", path = @"C:\fake\s7.psm1", signatureThumbprint = new string('A', 40) },
+                    riskTier = "read",
+                    jeaMapping = new { endpointName = "ep.read", roleCapabilityName = "rc.read3", cmdlet = "Get-Days", moduleName = "Get-Days", accessGroup = "G" },
+                    parameters = new object[]
+                    {
+                        new { name = "Count", type = "int", required = false, allowlist = new { regexPattern = "^[0-9]{1,20}$" } },
+                        new { name = "Flag", type = "bool", required = false, allowlist = new { enumValues = new[] { "yes", "no" } } }
+                    },
+                    untrustedInputSources = Array.Empty<string>(),
+                    maskedFields = Array.Empty<string>()
                 }
             }
         };
@@ -157,18 +184,146 @@ public sealed class BrokerPipelineTests : IDisposable
         Assert.Equal("untrusted-source-cannot-mutate", result.RejectReason);
     }
 
+    /// <summary>
+    /// Taint gates the destructive tier only. A tainted caller driving a WRITE tool is not
+    /// refused at gate 3b — most read tools taint the caller, so gating writes on taint
+    /// refused every "re-read, then write" sequence for the whole window. The call must still
+    /// stop at the approval gate: taint relaxation never substitutes for the human decision.
+    /// </summary>
     [Fact]
-    public async Task TaintedCallerBlockedFromWriteTool()
+    public async Task TaintedCallerReachesElicitationForWriteToolAndApprovalStillDecides()
     {
         var taint = new TaintTracker(windowSeconds: 300);
         taint.MarkTainted("TAINTED-CALLER");
         var pipeline = BuildPipeline(new FakeSignatureVerifier(true), taint: taint);
 
+        int asked = 0;
+        var denying = new ElicitationChannel((ectx, ct) =>
+        {
+            Interlocked.Increment(ref asked);
+            return Task.FromResult(new ElicitationReply(ectx.CorrelationId, ectx.ParamHash, false, "APPROVER-SID", ectx.ToolId));
+        });
+
         var ctx = CallContext.New("TAINTED-CALLER", "write-tool");
-        var result = await pipeline.DispatchAsync(Call("write-tool"), ctx, ThrowingElicitation(), CancellationToken.None);
+        var result = await pipeline.DispatchAsync(Call("write-tool"), ctx, denying, CancellationToken.None);
+
+        Assert.Equal(1, asked);
+        Assert.False(result.Success);
+        Assert.Equal("elicitation-denied", result.RejectReason);
+    }
+
+    /// <summary>
+    /// Because write-tier calls are not refused on taint, the approver must be told: the
+    /// elicitation context carries the broker's own taint state for the caller.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ElicitationContextTellsTheApproverWhetherTheCallerIsTainted(bool tainted)
+    {
+        var taint = new TaintTracker(windowSeconds: 300);
+        if (tainted) taint.MarkTainted("CALLER");
+        var pipeline = BuildPipeline(new FakeSignatureVerifier(true), taint: taint);
+
+        ElicitationContext? seen = null;
+        var denying = new ElicitationChannel((ectx, ct) =>
+        {
+            seen = ectx;
+            return Task.FromResult(new ElicitationReply(ectx.CorrelationId, ectx.ParamHash, false, "APPROVER-SID", ectx.ToolId));
+        });
+
+        var ctx = CallContext.New("CALLER", "write-tool-elicited");
+        await pipeline.DispatchAsync(Call("write-tool-elicited"), ctx, denying, CancellationToken.None);
+
+        Assert.NotNull(seen);
+        Assert.Equal(tainted, seen.CallerTainted);
+    }
+
+    [Fact]
+    public async Task TaintedCallerBlockedFromDestructiveTool()
+    {
+        var taint = new TaintTracker(windowSeconds: 300);
+        taint.MarkTainted("TAINTED-CALLER");
+        var pipeline = BuildPipeline(new FakeSignatureVerifier(true), taint: taint);
+
+        // ThrowingElicitation proves the destructive call is refused BEFORE any approver is asked.
+        var ctx = CallContext.New("TAINTED-CALLER", "destructive-tool");
+        var result = await pipeline.DispatchAsync(Call("destructive-tool"), ctx, ThrowingElicitation(), CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal("caller-tainted", result.RejectReason);
+    }
+
+    [Fact]
+    public async Task UntaintedCallerReachesElicitationForDestructiveTool()
+    {
+        // Taint is caller-scoped: another caller's taint must not block this one.
+        var taint = new TaintTracker(windowSeconds: 300);
+        taint.MarkTainted("SOMEONE-ELSE");
+        var pipeline = BuildPipeline(new FakeSignatureVerifier(true), taint: taint);
+
+        var ctx = CallContext.New("CLEAN-CALLER", "destructive-tool");
+        var result = await pipeline.DispatchAsync(Call("destructive-tool"), ctx, DenyingElicitation(), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("elicitation-denied", result.RejectReason);
+    }
+
+    /// <summary>
+    /// The approval wait can last the full elicitation TTL while the caller keeps reading.
+    /// A caller that becomes tainted during that wait must not have its already-approved
+    /// destructive call executed: the pre-elicitation taint check is stale by then.
+    /// </summary>
+    [Fact]
+    public async Task CallerTaintedDuringApprovalWaitIsRejectedForDestructiveTool()
+    {
+        var taint = new TaintTracker(windowSeconds: 300);
+        var pipeline = BuildPipeline(new FakeSignatureVerifier(true), taint: taint);
+
+        var ctx = CallContext.New("CALLER", "destructive-tool");
+        var result = await pipeline.DispatchAsync(
+            Call("destructive-tool"), ctx, TaintingThenApprovingElicitation(taint), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("caller-tainted-after-approval", result.RejectReason);
+    }
+
+    [Fact]
+    public async Task CallerTaintedDuringApprovalWaitStillExecutesApprovedWriteTool()
+    {
+        var taint = new TaintTracker(windowSeconds: 300);
+        var pipeline = BuildPipeline(new FakeSignatureVerifier(true), taint: taint);
+
+        var ctx = CallContext.New("CALLER", "write-tool-elicited");
+        var result = await pipeline.DispatchAsync(
+            Call("write-tool-elicited"), ctx, TaintingThenApprovingElicitation(taint), CancellationToken.None);
+
+        // Past both taint checks and the approval gate; fails only at JEA invoke (fake
+        // server path), the same terminal state as an untainted approved write.
+        Assert.True(taint.IsTainted("CALLER"));
+        Assert.False(result.Success);
+        Assert.Equal("jea-execution-error", result.RejectReason);
+    }
+
+    /// <summary>
+    /// A value can satisfy the allowlist and still not convert to its declared type: digits
+    /// that pass a regex but overflow an int, or an enum member that is not a boolean
+    /// literal. That used to escape DispatchAsync as an unhandled exception after the request
+    /// had been audited as accepted. It must end as a recorded, fail-closed rejection.
+    /// </summary>
+    [Theory]
+    [InlineData("Count", "99999999999999999999")] // OverflowException in ArgvBuilder
+    [InlineData("Flag", "yes")]                   // FormatException in ArgvBuilder
+    public async Task AllowlistedButUnconvertibleValueIsRejectedNotThrown(string parameter, string value)
+    {
+        var pipeline = BuildPipeline(new FakeSignatureVerifier(true));
+        var ctx = CallContext.New("CALLER", "int-param-tool");
+        var request = new ToolCallRequest { ToolId = "int-param-tool", Parameters = new() { [parameter] = value } };
+
+        var result = await pipeline.DispatchAsync(request, ctx, ThrowingElicitation(), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("argv-build-refused", result.RejectReason);
     }
 
     [Fact]
@@ -296,6 +451,18 @@ public sealed class BrokerPipelineTests : IDisposable
     private static ElicitationChannel ThrowingElicitation() =>
         new((ctx, ct) => throw new InvalidOperationException(
             "Elicitation reached — a gate that should have rejected earlier did not."));
+
+    /// <summary>
+    /// Models the caller ingesting untrusted data on another frame while the approver is
+    /// still deciding: the caller is marked tainted mid-wait, then the approval arrives.
+    /// </summary>
+    private static ElicitationChannel TaintingThenApprovingElicitation(TaintTracker taint) =>
+        new((ctx, ct) =>
+        {
+            taint.MarkTainted(ctx.CallerSid);
+            return Task.FromResult(new ElicitationReply(
+                ctx.CorrelationId, ctx.ParamHash, true, "APPROVER-SID", ctx.ToolId));
+        });
 
     public void Dispose()
     {

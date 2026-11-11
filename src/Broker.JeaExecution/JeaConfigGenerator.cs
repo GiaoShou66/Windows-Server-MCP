@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Broker.Core;
 using Broker.Registry;
@@ -105,7 +106,13 @@ public sealed class JeaConfigGenerator
         if (a.RegexPattern is { } pattern)
             return $"@{{ Name = '{p.Name}'; ValidatePattern = '{Escape(pattern)}' }}";
         if (a.Range is { } range)
-            return $"@{{ Name = '{p.Name}'; ValidateRange = {range.Min},{range.Max} }}";
+        {
+            // Invariant formatting: under a comma-decimal culture "1.5" would be written "1,5"
+            // and read back by PowerShell as two array elements, silently changing the range.
+            var min = range.Min.ToString(CultureInfo.InvariantCulture);
+            var max = range.Max.ToString(CultureInfo.InvariantCulture);
+            return $"@{{ Name = '{p.Name}'; ValidateRange = {min},{max} }}";
+        }
 
         // maxLength-only: no native JEA equivalent, enforced broker-side by ParameterValidator
         return $"@{{ Name = '{p.Name}' }}";

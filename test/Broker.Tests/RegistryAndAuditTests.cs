@@ -158,6 +158,31 @@ public sealed class ManifestIntegrityTests : IDisposable
         Assert.NotNull(store.Get("integrity-tool"));
     }
 
+    /// <summary>
+    /// The shipped manifest and its sidecar must agree, byte for byte, in the working tree.
+    /// The broker runs with Manifest:RequireIntegrity=true, so a manifest edited without
+    /// regenerating policy/manifest.json.sha256 loads an EMPTY registry and every call is
+    /// refused as unknown-or-revoked-tool. This also guards the line-ending convention: the
+    /// sidecar is computed over the CRLF form that .gitattributes pins for every checkout.
+    /// </summary>
+    [Fact]
+    public void ShippedManifestMatchesItsIntegritySidecar()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "mcp-broker.sln")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+
+        var manifestPath = Path.Combine(dir.FullName, "policy", "manifest.json");
+        var expected = File.ReadAllText(manifestPath + ".sha256").Trim();
+        var actual = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(manifestPath)));
+
+        Assert.Equal(expected, actual, ignoreCase: true);
+
+        using var store = new ManifestStore(manifestPath, NullLogger<ManifestStore>.Instance, requireIntegrity: true);
+        Assert.NotEmpty(store.All);
+    }
+
     private static string ManifestWithOneTool() => """
         {
           "tools": [{

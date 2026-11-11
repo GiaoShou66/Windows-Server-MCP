@@ -26,10 +26,13 @@ public interface IToolCallDispatcher
 /// Everything the broker must show a human (or an approver) to decide one call.
 /// Parameters are carried so the approver sees WHAT is being authorized, not just a hash:
 /// approving a hash the approver never saw is rubber-stamping, not review.
+/// CallerTainted is the broker's own taint-tracker state for the caller at the moment the
+/// card is raised (never a caller-supplied value). Write-tier calls are not refused on
+/// taint, so the approver is told instead and can verify the target independently.
 /// </summary>
 public sealed record ElicitationContext(
     string CorrelationId, string ToolId, string CallerSid, string ParamHash,
-    IReadOnlyDictionary<string, string>? Parameters = null);
+    IReadOnlyDictionary<string, string>? Parameters = null, bool CallerTainted = false);
 
 /// <summary>
 /// Requests a human decision for one call and awaits it. The delegate is supplied by the
@@ -51,7 +54,7 @@ public sealed record ElicitationReply(
 public sealed record PendingElicitation(
     string CorrelationId, string ToolId, string CallerSid, string ParamHash,
     DateTimeOffset ExpiresUtc, TaskCompletionSource<ElicitationReply> Tcs,
-    IReadOnlyDictionary<string, string>? Parameters = null);
+    IReadOnlyDictionary<string, string>? Parameters = null, bool CallerTainted = false);
 
 /// <summary>
 /// Shared registry that decouples the caller's pipe from the approver's pipe. A dispatch
@@ -75,7 +78,7 @@ public sealed class ElicitationRouter
         var tcs = new TaskCompletionSource<ElicitationReply>(TaskCreationOptions.RunContinuationsAsynchronously);
         var pe = new PendingElicitation(
             ctx.CorrelationId, ctx.ToolId, ctx.CallerSid, ctx.ParamHash,
-            DateTimeOffset.UtcNow.Add(ttl), tcs, ctx.Parameters);
+            DateTimeOffset.UtcNow.Add(ttl), tcs, ctx.Parameters, ctx.CallerTainted);
         lock (_pendingLock)
             _pending[ctx.CorrelationId] = pe;
 
@@ -354,6 +357,10 @@ public sealed class NamedPipeServer
         }
     }
 
+    // Identity is fixed at connect time, before any frame is read. That requires the client
+    // to open the pipe with an explicit impersonation level (Identification is enough): with
+    // none, Windows only lets the server impersonate after it has read data, RunAsClient
+    // throws, and the connection is dropped by the caller's catch (fail closed).
     private static string CaptureCallerSid(NamedPipeServerStream stream)
     {
         string sid = string.Empty;
@@ -695,7 +702,9 @@ public sealed class ApprovalPipeServer
                 callerSid = pe.CallerSid,
                 paramHash = pe.ParamHash,
                 parameters = pe.Parameters ?? new Dictionary<string, string>(),
-                expiresUtc = pe.ExpiresUtc
+                expiresUtc = pe.ExpiresUtc,
+                // Broker-derived (TaintTracker), shown on the approval card.
+                callerTainted = pe.CallerTainted
             });
             await writeLock.WaitAsync(ct);
             try { await McpFraming.WriteFrameAsync(stream, json, ct); }

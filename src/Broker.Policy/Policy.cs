@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -50,17 +51,55 @@ public sealed class ParameterValidator
         if (a.MaxLength is { } max && value.Length > max)
             return $"parameter-too-long:{p.Name}";
 
-        if (a.EnumValues is { Count: > 0 } set && !set.Contains(value, StringComparer.Ordinal))
-            return $"parameter-not-in-enum:{p.Name}";
+        if (a.EnumValues is { Count: > 0 } set)
+        {
+            // Booleans compare case-insensitively: clients routinely serialize them as
+            // "True"/"False", and ArgvBuilder converts with bool.Parse, which ignores case
+            // too — exact-case matching refused values the broker would have converted
+            // correctly. Every other type stays ordinal: members such as "Start"/"Stop" are
+            // identifiers, not booleans.
+            bool isMatch = p.Type == "bool"
+                ? set.Contains(value, StringComparer.OrdinalIgnoreCase)
+                : set.Contains(value, StringComparer.Ordinal);
 
-        if (a.RegexPattern is { } pattern &&
-            !Regex.IsMatch(value, pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)))
-            return $"parameter-pattern-mismatch:{p.Name}";
+            if (!isMatch)
+                return $"parameter-not-in-enum:{p.Name}";
+        }
+
+        if (a.RegexPattern is { } pattern)
+        {
+            // An allowlist pattern must describe the WHOLE value. In .NET '$' also matches
+            // before a final '\n', so "name\n" satisfied "^[a-z]+$". Requiring the match to
+            // span the entire value closes that gap and fails closed on an unanchored pattern.
+            var match = Regex.Match(value, pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+            if (!match.Success || match.Index != 0 || match.Length != value.Length)
+                return $"parameter-pattern-mismatch:{p.Name}";
+        }
 
         if (a.Range is { } range)
         {
-            if (!double.TryParse(value, out var num)) return $"parameter-not-numeric:{p.Name}";
-            if (num < range.Min || num > range.Max) return $"parameter-out-of-range:{p.Name}";
+            // Invariant culture, no whitespace and no group separators: the same text must be
+            // the same number on every host, and exactly what ArgvBuilder will convert. An
+            // int parameter must be integer text, so "1e1" or "5.0" stops here rather than
+            // after the call has been audited as accepted (or approved).
+            double num;
+            if (p.Type == "int")
+            {
+                if (!int.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var whole))
+                    return $"parameter-not-numeric:{p.Name}";
+                num = whole;
+            }
+            else if (!double.TryParse(
+                         value,
+                         NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent,
+                         CultureInfo.InvariantCulture, out num))
+            {
+                return $"parameter-not-numeric:{p.Name}";
+            }
+
+            // Written as a positive test so NaN (which double.TryParse accepts, and which
+            // compares false against every bound) is out of range instead of slipping through.
+            if (!(num >= range.Min && num <= range.Max)) return $"parameter-out-of-range:{p.Name}";
         }
 
         // schema guarantees at least one constraint; if somehow none, fail closed
@@ -88,19 +127,27 @@ public sealed class UntrustedSourceGate
     }
 }
 
-/// <summary>Per-caller sliding-window rate limiter. Separate budget for destructive calls.</summary>
+/// <summary>
+/// Per-caller sliding-window rate limiter. Separate hourly budgets for write and destructive
+/// calls. Every write-tier call raises an approval card, and a tainted caller is no longer
+/// refused before that point, so the write budget is what bounds how many cards one caller
+/// (or whatever is steering it) can put in front of the approver.
+/// </summary>
 public sealed class RateLimiter
 {
     private readonly int _callsPerMinute;
+    private readonly int _writePerHour;
     private readonly int _destructivePerHour;
     private readonly object _lock = new();
     private readonly Dictionary<string, Queue<DateTimeOffset>> _all = new();
+    private readonly Dictionary<string, Queue<DateTimeOffset>> _write = new();
     private readonly Dictionary<string, Queue<DateTimeOffset>> _destructive = new();
 
-    public RateLimiter(int callsPerMinute = 60, int destructivePerHour = 10)
+    public RateLimiter(int callsPerMinute = 60, int destructivePerHour = 10, int writePerHour = 60)
     {
         _callsPerMinute = callsPerMinute;
         _destructivePerHour = destructivePerHour;
+        _writePerHour = writePerHour;
     }
 
     public PolicyDecision Check(string callerSid, RiskTier tier)
@@ -110,6 +157,10 @@ public sealed class RateLimiter
         {
             if (!Allow(_all, callerSid, now, TimeSpan.FromMinutes(1), _callsPerMinute))
                 return PolicyDecision.Deny("rate-limit-exceeded");
+
+            if (tier is RiskTier.Write &&
+                !Allow(_write, callerSid, now, TimeSpan.FromHours(1), _writePerHour))
+                return PolicyDecision.Deny("write-rate-limit-exceeded");
 
             if (tier is RiskTier.Destructive &&
                 !Allow(_destructive, callerSid, now, TimeSpan.FromHours(1), _destructivePerHour))
@@ -149,9 +200,10 @@ public sealed class ArgvBuilder
 
             if (!supplied.TryGetValue(p.Name, out var raw)) continue;
 
+            // Same parsing rules as ParameterValidator: invariant culture, integer text only.
             argv[p.Name] = p.Type switch
             {
-                "int" => int.Parse(raw),
+                "int" => int.Parse(raw, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture),
                 "bool" => bool.Parse(raw),
                 _ => raw
             };

@@ -11,7 +11,8 @@ public sealed record ApprovalRequest(
     string CallerSid,
     string ParamHash,
     Dictionary<string, string> Parameters,
-    DateTime ExpiresUtc);
+    DateTime ExpiresUtc,
+    bool? CallerTainted = null);
 
 public delegate Task<bool> ApprovalDecisionPrompter(ApprovalRequest request);
 
@@ -31,7 +32,12 @@ public sealed class ApproverClient
         var currentIdentity = WindowsIdentity.GetCurrent().User?.Value ?? "UNKNOWN";
         await output.WriteLineAsync($"[approver-cli] Connecting to approval pipe '\\\\.\\pipe\\{_pipeName}' as approver SID: {currentIdentity}");
 
-        using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        // Identification is declared explicitly: with no level the broker cannot read this
+        // connection's SID until it has read data from the pipe, and it captures the approver
+        // identity at connect time — so the connection was dropped. Identification lets the
+        // broker see who the approver is without being able to act as them.
+        using var client = new NamedPipeClientStream(
+            ".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
         await client.ConnectAsync(ct);
         await output.WriteLineAsync("[approver-cli] Connected. Waiting for authorization requests from MCP Broker...");
 
@@ -83,7 +89,14 @@ public sealed class ApproverClient
                 }
             }
 
-            var request = new ApprovalRequest(correlationId, toolId, callerSid, paramHash, parameters, expiresUtc);
+            // Reported by the broker from its own taint tracker, never by the caller. A broker
+            // that predates the field omits it: that is shown as "unknown", never as "no".
+            bool? callerTainted = null;
+            if (root.TryGetProperty("callerTainted", out var taintElem) &&
+                taintElem.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                callerTainted = taintElem.GetBoolean();
+
+            var request = new ApprovalRequest(correlationId, toolId, callerSid, paramHash, parameters, expiresUtc, callerTainted);
             var approved = await _prompter(request);
 
             var replyJson = JsonSerializer.Serialize(new
@@ -99,6 +112,20 @@ public sealed class ApproverClient
         }
     }
 
+    /// <summary>
+    /// Card text for the caller's taint state. A tainted caller received output from a tool
+    /// that can carry attacker-influenced text (AD attributes, host metadata, file contents)
+    /// within the broker's taint window, so the request may be the result of prompt
+    /// injection. The broker no longer refuses write-tier calls on taint; this line is how
+    /// the approver learns of it.
+    /// </summary>
+    public static string DescribeTaint(bool? callerTainted) => callerTainted switch
+    {
+        true => "YES - read untrusted data recently; verify the target yourself",
+        false => "no",
+        null => "unknown (broker did not report it)"
+    };
+
     private static async Task<bool> DefaultConsolePrompter(ApprovalRequest request)
     {
         await Console.Out.WriteLineAsync();
@@ -108,6 +135,7 @@ public sealed class ApproverClient
         await Console.Out.WriteLineAsync($"CorrelationId:  {request.CorrelationId}");
         await Console.Out.WriteLineAsync($"Tool ID:        {request.ToolId}");
         await Console.Out.WriteLineAsync($"Caller SID:     {request.CallerSid}");
+        await Console.Out.WriteLineAsync($"Caller taint:   {DescribeTaint(request.CallerTainted)}");
         await Console.Out.WriteLineAsync($"Expires (UTC):  {request.ExpiresUtc:u}");
         await Console.Out.WriteLineAsync("Parameters:");
         foreach (var (k, v) in request.Parameters)

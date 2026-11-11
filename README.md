@@ -30,9 +30,11 @@ application-level check. Built because Microsoft's native MCP stack is Windows 1
 
 Any gate that does not explicitly allow terminates the call. Rate limiting runs
 second (before expensive Authenticode signature checks) for DoS resistance. The
-untrusted-source gate is a hard stop with no elicitation override: data that may
-carry injected content (AD attributes, file contents, network responses) can
-never reach a write/destructive tool.
+untrusted-source gate is a hard stop with no elicitation override: a tool whose
+own output may carry injected content (AD attributes, host metadata, file
+contents) can never also be a write/destructive tool. It is a per-tool rule, not
+data-flow tracking: what a caller does with data it has already read is covered
+by the caller-taint gate and by human approval (see Security principles).
 
 ## Security principles
 
@@ -45,8 +47,14 @@ never reach a write/destructive tool.
   WinVerifyTrust checks) to protect against CPU/IO exhaustion DoS.
 - **No credentials in LLM context** — execution uses the gMSA's Kerberos identity
   or low-privilege virtual accounts.
-- **Prompt-injection defense** — untrusted external data taints the caller and
-  never auto-triggers a mutating tool.
+- **Prompt-injection defense** — reading untrusted external data taints the
+  caller for a window (`Taint:WindowSeconds`, default 300 s). A tainted caller is
+  refused destructive-tier tools outright. Write-tier tools are not taint-gated:
+  most read tools taint the caller, so that would refuse every re-read-then-write
+  sequence. Instead the approval card shows the caller's taint state and a
+  distinct human approver decides. Write-tier calls also have their own hourly
+  budget per caller (`RateLimit:WritePerHour`, default 60), which bounds how many
+  approval cards one caller can raise.
 - **Fail-closed masking** — sensitive output fields (SIDs, DNs) are redacted
   before return; non-JSON payloads never leak raw unmasked data.
 
@@ -204,7 +212,7 @@ dotnet publish src/Broker.Host/Broker.Host.csproj -c Release -o publish
 
 ## Hardening status
 
-All critical non-negotiable invariants and security audit findings (C1, C2, H1–H6, M1–M5) are remediated and enforced with zero warnings across **146 automated unit and integration tests**:
+All critical non-negotiable invariants and security audit findings (C1, C2, H1–H6, M1–M5) are remediated and enforced with zero warnings across **228 automated unit and integration tests**:
 
 - **Disjoint caller and approver identities (Invariant 1 & M2)**: Start-up enforcement guarantees `Caller SIDs ∩ Approver SIDs = ∅`. Write-tier requests fail fast (`distinct-approver-required`) if distinct approver mode is not enabled.
 - **Strict JEA isolation (Invariant 3, C2, M4)**: `JeaConfigGenerator` strictly restricts `RoleDefinitions` to the broker service account only, rejecting broad access groups (`BUILTIN\Users`, `Domain Users`, `Authenticated Users`, `Everyone`). Automatically cleans up stale `.psrc` and `.pssc` artifacts.
@@ -244,14 +252,14 @@ dotnet run --project src/Broker.McpAdapter -- --pipe McpBroker --manifest policy
 ```
 
 ### Standalone Approver CLI (`Broker.ApproverCli`)
-Connects to the separate approval pipe (`\\.\pipe\McpBroker.Approvals`) under an authorized human operator identity. Displays pending tool requests, parameter values, caller SID, and expiry, allowing interactive human authorization (`[y/N]`) for write-tier operations:
+Connects to the separate approval pipe (`\\.\pipe\McpBroker.Approvals`) under an authorized human operator identity. Displays pending tool requests, parameter values, caller SID, caller taint state, and expiry, allowing interactive human authorization (`[y/N]`) for write-tier operations:
 ```powershell
 dotnet run --project src/Broker.ApproverCli -- --pipe McpBroker.Approvals
 ```
 
 ## Testing
 
-`test/Broker.Tests` (146 tests, 100% passing, 0 warnings), run on real Windows, no mocking of the OS layer where it
+`test/Broker.Tests` (228 tests, 100% passing, 0 warnings), run on real Windows, no mocking of the OS layer where it
 matters:
 
 - **PSObject serialization tests** against the real `System.Management.Automation` types
@@ -279,6 +287,13 @@ matters:
   not a mock. This caught a real bug during development (below).
 - **ManifestStore revocation tests** against a real `FileSystemWatcher`, and `CorrelationLog`
   JSONL round-trip tests.
+- **Real named-pipe end-to-end tests** — `Broker.McpAdapter` and `Broker.ApproverCli` against
+  the real `NamedPipeServer` / `ApprovalPipeServer` over OS pipes, asserting the SID the broker
+  captures by impersonation. The in-memory transport tests never exercised identity capture,
+  and it did not work: a pipe client that declares no impersonation level cannot be
+  impersonated until the server has read data, so every real connection was dropped at
+  connect. Both shipped clients now connect with `TokenImpersonationLevel.Identification`;
+  any other client must do the same.
 
 ```powershell
 dotnet test mcp-broker.sln

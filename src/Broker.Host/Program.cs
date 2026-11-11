@@ -201,7 +201,8 @@ builder.Services.AddSingleton(sp =>
     var cfg = sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
     int perMin = int.TryParse(cfg["RateLimit:CallsPerMinute"], out var a) ? a : 60;
     int destPerHour = int.TryParse(cfg["RateLimit:DestructivePerHour"], out var b) ? b : 10;
-    return new RateLimiter(perMin, destPerHour);
+    int writePerHour = int.TryParse(cfg["RateLimit:WritePerHour"], out var c) ? c : 60;
+    return new RateLimiter(perMin, destPerHour, writePerHour);
 });
 
 // JEA

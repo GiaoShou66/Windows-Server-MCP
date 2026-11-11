@@ -13,7 +13,7 @@ function Set-BrokerScheduledTaskState {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidatePattern('^\\[\\A-Za-z0-9 _.-]*\\$')]
+        [ValidatePattern('^(\\|\\[\\A-Za-z0-9 _.-]*\\)$')]
         [string] $TaskPath,
 
         [Parameter(Mandatory = $true)]

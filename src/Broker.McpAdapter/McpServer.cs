@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Broker.Transport;
@@ -182,25 +183,42 @@ public sealed class McpServer
                         var properties = new Dictionary<string, object>();
                         var requiredList = new List<string>();
 
-                        if (toolElem.TryGetProperty("parameters", out var paramsObj) &&
-                            paramsObj.ValueKind == JsonValueKind.Object)
+                        // The manifest stores "parameters" as an ARRAY of
+                        // { name, type, required, allowlist } entries (policy/tool-manifest.schema.json),
+                        // not as an object keyed by parameter name.
+                        if (toolElem.TryGetProperty("parameters", out var paramsElem) &&
+                            paramsElem.ValueKind == JsonValueKind.Array)
                         {
-                            foreach (var p in paramsObj.EnumerateObject())
+                            foreach (var p in paramsElem.EnumerateArray())
                             {
-                                var pName = p.Name;
-                                var pType = "string";
-                                var pDesc = "";
-                                if (p.Value.TryGetProperty("type", out var t)) pType = t.GetString() ?? "string";
-                                if (p.Value.TryGetProperty("description", out var pd)) pDesc = pd.GetString() ?? "";
-                                var isReq = p.Value.TryGetProperty("required", out var req) && req.GetBoolean();
+                                // Skip a malformed entry instead of throwing: the catch below would
+                                // otherwise silently truncate the tool list at this tool.
+                                if (p.ValueKind != JsonValueKind.Object ||
+                                    !p.TryGetProperty("name", out var n) ||
+                                    n.ValueKind != JsonValueKind.String)
+                                    continue;
 
-                                properties[pName] = new
+                                var pName = n.GetString();
+                                if (string.IsNullOrEmpty(pName)) continue;
+
+                                var pType = p.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String
+                                    ? t.GetString() ?? "string"
+                                    : "string";
+                                var pDesc = p.TryGetProperty("description", out var pd) && pd.ValueKind == JsonValueKind.String
+                                    ? pd.GetString() ?? string.Empty
+                                    : string.Empty;
+                                var isReq = p.TryGetProperty("required", out var req) && req.ValueKind == JsonValueKind.True;
+
+                                var propertySchema = new Dictionary<string, object>
                                 {
-                                    type = pType,
-                                    description = pDesc
+                                    ["type"] = ToJsonSchemaType(pType)
                                 };
+                                if (pDesc.Length > 0) propertySchema["description"] = pDesc;
 
-                                if (isReq) requiredList.Add(pName);
+                                properties[pName] = propertySchema;
+
+                                // JSON Schema requires the "required" array to hold unique names.
+                                if (isReq && !requiredList.Contains(pName)) requiredList.Add(pName);
                             }
                         }
 
@@ -227,6 +245,21 @@ public sealed class McpServer
         return SerializeResult(id, new { tools });
     }
 
+    /// <summary>
+    /// Maps a manifest parameter type (string | int | bool | enum, per
+    /// policy/tool-manifest.schema.json) to a JSON Schema draft-07 primitive type name.
+    /// The manifest's own names are not valid JSON Schema types, and a client that validates
+    /// inputSchema rejects the whole tools/list response on an unknown one. A non-string
+    /// argument is flattened back to its raw JSON text in HandleToolsCallAsync, so a JSON
+    /// true or 5 still reaches the broker as "true" / "5".
+    /// </summary>
+    private static string ToJsonSchemaType(string manifestType) => manifestType switch
+    {
+        "int" => "integer",
+        "bool" => "boolean",
+        _ => "string"
+    };
+
     private async Task<string> HandleToolsCallAsync(JsonElement? id, JsonElement paramsElem, CancellationToken ct)
     {
         if (paramsElem.ValueKind != JsonValueKind.Object)
@@ -246,6 +279,10 @@ public sealed class McpServer
         {
             foreach (var prop in argsElem.EnumerateObject())
             {
+                // JSON null means "not supplied". Forwarding it would hand the broker the
+                // literal string "null", which several name allowlists accept as a real value.
+                if (prop.Value.ValueKind == JsonValueKind.Null) continue;
+
                 parameters[prop.Name] = prop.Value.ValueKind == JsonValueKind.String
                     ? prop.Value.GetString() ?? string.Empty
                     : prop.Value.GetRawText();
@@ -300,7 +337,14 @@ public sealed class McpServer
     private static async Task<ToolExecutionResult> CallBrokerViaPipeAsync(
         string pipeName, string toolId, Dictionary<string, string> parameters, CancellationToken ct)
     {
-        using var clientStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        // The impersonation level is declared explicitly. With none, Windows tracks the client's
+        // security context dynamically and the broker's connect-time SID capture (RunAsClient
+        // before any read) fails with "Unable to impersonate using a named pipe until data has
+        // been read from that pipe", so every connection was dropped. Identification is also
+        // the least privilege that works: the broker learns who the caller is and cannot act
+        // as them.
+        using var clientStream = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
         await clientStream.ConnectAsync(5000, ct);
 
         var requestJson = JsonSerializer.Serialize(new

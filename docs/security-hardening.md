@@ -74,6 +74,16 @@ publish directories writable by `Everyone`, `Authenticated Users`, or
 `BUILTIN\Users`. Do not use a developer or temporary publish directory in
 production.
 - Review the exact tool, parameters, target, caller, and expected impact before approval.
+- When a card shows `Caller taint: YES`, the caller recently received tool output that can
+  carry attacker-influenced text (AD attributes, host metadata, file contents). The broker
+  does not refuse write-tier calls on taint, so verify the target against an independent
+  source, not against what the requesting session reported.
+- Size `RateLimit:WritePerHour` (default 60 per caller) to the real approval capacity; it
+  bounds how many approval cards one caller can raise.
+- Any pipe client other than `Broker.McpAdapter` / `Broker.ApproverCli` must open the pipe
+  with an explicit impersonation level (`Identification` is sufficient and preferred).
+  Connections that declare none are dropped at connect, because the broker captures the
+  caller SID before it reads any data.
 - Treat a disconnect or timeout as an uncertain execution outcome until the underlying
   PowerShell operation is verified stopped.
 - Configure explicit `resourceAllowlist` values for every write tool before enabling it.

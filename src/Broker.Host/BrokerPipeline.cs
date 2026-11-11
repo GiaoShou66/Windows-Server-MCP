@@ -104,8 +104,13 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         if (!_signatures.Verify(tool)) return Reject(context, "signature-verification-failed");
 
         // 3b — caller taint: a caller that recently received untrusted external data may not
-        //       drive a mutating tool until the taint window expires (prompt-injection defense).
-        if (tier is RiskTier.Write or RiskTier.Destructive && _taint.IsTainted(context.CallerSid))
+        //       drive a destructive tool until the taint window expires (prompt-injection defense).
+        //       Write-tier tools are deliberately NOT taint-gated. Most read tools taint the
+        //       caller, so gating writes refused every "re-read, then write" call for the whole
+        //       window. For a write, the out-of-band decision of a distinct approver (gate 7)
+        //       is the control against cross-turn prompt injection. This matches TaintTracker's
+        //       documented contract, which covers destructive calls only.
+        if (tier is RiskTier.Destructive && _taint.IsTainted(context.CallerSid))
             return Reject(context, "caller-tainted");
 
         // 4 — parameter allowlist validation (broker-side defense in depth)
@@ -146,10 +151,13 @@ public sealed class BrokerPipeline : IToolCallDispatcher
             ElicitationReply reply;
             try
             {
+                // Write-tier calls are not refused on taint (gate 3b), so the approver is told
+                // instead: the card states whether this caller recently received untrusted
+                // tool output. The value comes from the broker's own tracker, never the caller.
                 reply = await elicitation.RequestAsync(
                     new ElicitationContext(
                         context.CorrelationId, tool.ToolId, context.CallerSid, paramHash,
-                        request.Parameters),
+                        request.Parameters, _taint.IsTainted(context.CallerSid)),
                     revokeCts.Token);
             }
             catch (OperationCanceledException)
@@ -175,8 +183,9 @@ public sealed class BrokerPipeline : IToolCallDispatcher
             // Re-check after the wait. Elicitation can block for up to the configured TTL
             // (120s default) while the reader keeps processing other frames, so a caller
             // could be tainted or the tool revoked during the wait. The pre-elicitation
-            // checks are stale by the time approval arrives; re-evaluate both.
-            if (tier is RiskTier.Write or RiskTier.Destructive && _taint.IsTainted(context.CallerSid))
+            // checks are stale by the time approval arrives; re-evaluate both. The taint
+            // re-check covers the same tier as gate 3b (destructive only).
+            if (tier is RiskTier.Destructive && _taint.IsTainted(context.CallerSid))
                 return Reject(context, "caller-tainted-after-approval");
 
             if (_manifest.Get(tool.ToolId) is null)
@@ -189,8 +198,13 @@ public sealed class BrokerPipeline : IToolCallDispatcher
         {
             argv = _argvBuilder.Build(tool, request.Parameters);
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException or OverflowException)
         {
+            // FormatException / OverflowException: a value that passed the allowlist but cannot
+            // be converted to its declared type (e.g. regex-allowlisted digits too large for
+            // an int). These used to escape the pipeline after the request was audited as
+            // accepted (and, for a mutating tool, after it was approved), reaching the caller
+            // as an unaudited "internal-error" instead of a recorded rejection.
             _logger.LogError(ex, "ArgvBuilder refused call for {Tool}", tool.ToolId);
             return Reject(context, "argv-build-refused");
         }

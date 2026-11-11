@@ -1,0 +1,10 @@
+# Integrity-checked policy files. The SHA-256 sidecar is computed over the exact bytes on
+# disk, and the broker refuses to load a manifest that does not match it (every tool then
+# returns unknown-or-revoked-tool). These files must therefore have the same bytes in every
+# checkout, whatever core.autocrlf is set to.
+#
+#   manifest.json         stored LF in the repository, always checked out CRLF: the form the
+#                         sidecar is computed over. The UTF-8 BOM is part of the content.
+#   manifest.json.sha256  never converted.
+policy/manifest.json        text eol=crlf
+policy/manifest.json.sha256 -text

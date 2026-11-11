@@ -140,6 +140,34 @@ public sealed class JeaConfigGeneratorTests : IDisposable
         Assert.Contains("Name = 'Note'", psrc);
     }
 
+    /// <summary>
+    /// The emitted range must not depend on the culture of the host that runs generate-jea.
+    /// Under a comma-decimal culture 1.5 used to be written "1,5", which PowerShell reads as
+    /// two array elements — a different range from the one the broker enforces.
+    /// </summary>
+    [Fact]
+    public void ValidateRangeIsEmittedWithInvariantNumberFormatting()
+    {
+        var tool = Tool("t1", "ep.read", "rc1", "Get-A", "Get-A", "GROUP", parameters: new()
+        {
+            new ToolParameter { Name = "Ratio", Allowlist = new ParameterAllowlist { Range = new ParamRange { Min = -1.5, Max = 30.25 } } }
+        });
+
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+            new JeaConfigGenerator(_outDir).GenerateAll([tool]);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
+
+        var psrc = File.ReadAllText(Path.Combine(_outDir, "rc1.psrc"));
+        Assert.Contains("ValidateRange = -1.5,30.25 }", psrc);
+    }
+
     [Fact]
     public void GmsaEndpointEmitsGroupManagedServiceAccountNotVirtualAccount()
     {

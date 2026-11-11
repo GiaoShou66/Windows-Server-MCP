@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using Broker.ApproverCli;
 using Broker.Core;
+using Broker.McpAdapter;
 using Broker.Transport;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -418,5 +420,153 @@ public class ElicitationRouterTests
         Assert.False(router.TryResolve("corr-3",
             new ElicitationReply("corr-3", "hash-3", true, "APPROVER-SID", "other-tool")));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await requestTask);
+    }
+
+    /// <summary>
+    /// The caller's taint state travels with the pending approval so the approver's card can
+    /// show it. Write-tier calls are not refused on taint; this is how the approver is told.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PendingApprovalCarriesCallerTaint(bool tainted)
+    {
+        var router = new ElicitationRouter(NullLogger<ElicitationRouter>.Instance);
+        var received = new TaskCompletionSource<PendingElicitation>();
+        using var reg = router.RegisterApprover(pe => { received.TrySetResult(pe); return Task.CompletedTask; }, out _);
+
+        var ctx = new ElicitationContext("corr-taint", "write-tool", "CALLER", "hash-t", CallerTainted: tainted);
+        var requestTask = router.RequestAsync(ctx, TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        var notified = await received.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(tainted, notified.CallerTainted);
+
+        Assert.True(router.TryResolve("corr-taint",
+            new ElicitationReply("corr-taint", "hash-t", false, "APPROVER-SID", "write-tool")));
+        await requestTask.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+}
+
+/// <summary>Records what the pipeline entry point was handed, for identity assertions.</summary>
+internal sealed class RecordingDispatcher : IToolCallDispatcher
+{
+    public CallContext? Context { get; private set; }
+    public ToolCallRequest? Request { get; private set; }
+
+    public Task<ToolCallResult> DispatchAsync(
+        ToolCallRequest request, CallContext context, ElicitationChannel elicitation, CancellationToken ct)
+    {
+        Request = request;
+        Context = context;
+        return Task.FromResult(ToolCallResult.Ok("{\"ok\":true}"));
+    }
+}
+
+/// <summary>
+/// The shipped clients against the real pipe servers, over real OS named pipes. Every other
+/// transport test drives ServeAsync through an in-memory stream, where the caller SID is
+/// handed in as a string — so the one thing every policy decision is keyed on, identity
+/// captured from the connection by impersonation, was never exercised. It did not work: a
+/// client that declares no impersonation level cannot be impersonated until the server has
+/// read data, the broker captures the SID at connect time, and every real connection from
+/// Broker.McpAdapter and Broker.ApproverCli was dropped. These tests fail if that returns.
+/// </summary>
+public class RealPipeEndToEndTests
+{
+    private static string CurrentUserSid => System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+
+    [Fact]
+    public async Task AdapterCallOverRealPipeCarriesCallerIdentityAndArguments()
+    {
+        var pipeName = $"mcp-test-e2e-{Guid.NewGuid():N}";
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Pipe:Name"] = pipeName,
+            ["Pipe:MaxInstances"] = "1",
+            ["Pipe:AllowedSids:0"] = CurrentUserSid
+        }).Build();
+
+        var dispatcher = new RecordingDispatcher();
+        var server = new NamedPipeServer(
+            new PipeSecurityFactory(config, NullLogger<PipeSecurityFactory>.Instance), dispatcher,
+            new ElicitationRouter(NullLogger<ElicitationRouter>.Instance), config,
+            NullLogger<NamedPipeServer>.Instance);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var runTask = server.RunAsync(cts.Token);
+
+        // No manifest is needed for tools/call; the adapter only relays to the pipe.
+        var adapter = new McpServer(Path.Combine(Path.GetTempPath(), "mcp-test-no-such-manifest.json"), pipeName);
+        var responseJson = await adapter.ProcessMessageAsync(
+            """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"some-tool","arguments":{"Enabled":true,"Name":"x"}}}""",
+            cts.Token);
+
+        Assert.NotNull(responseJson);
+        using (var doc = JsonDocument.Parse(responseJson))
+        {
+            var result = doc.RootElement.GetProperty("result");
+            var text = result.GetProperty("content")[0].GetProperty("text").GetString();
+            Assert.False(result.GetProperty("isError").GetBoolean(), text);
+            Assert.Equal("{\"ok\":true}", text);
+        }
+
+        Assert.NotNull(dispatcher.Context);
+        Assert.NotNull(dispatcher.Request);
+        Assert.Equal(CurrentUserSid, dispatcher.Context.CallerSid);
+        Assert.Equal("some-tool", dispatcher.Request.ToolId);
+        Assert.Equal("true", dispatcher.Request.Parameters["Enabled"]);
+        Assert.Equal("x", dispatcher.Request.Parameters["Name"]);
+
+        cts.Cancel();
+        try { await runTask; } catch (OperationCanceledException) { }
+    }
+
+    [Fact]
+    public async Task ApproverCliOverRealPipeIsIdentifiedAndSeesCallerTaint()
+    {
+        var pipeName = $"mcp-test-approvals-{Guid.NewGuid():N}";
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Elicitation:ApprovalPipeName"] = pipeName,
+            ["Elicitation:ApprovalPipeInstances"] = "1",
+            ["Elicitation:ApproverSids:0"] = CurrentUserSid
+        }).Build();
+
+        var router = new ElicitationRouter(NullLogger<ElicitationRouter>.Instance);
+        var server = new ApprovalPipeServer(
+            new PipeSecurityFactory(config, NullLogger<PipeSecurityFactory>.Instance), router, config,
+            NullLogger<ApprovalPipeServer>.Instance);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var runTask = server.RunAsync(cts.Token);
+
+        ApprovalRequest? seen = null;
+        var approver = new ApproverClient(pipeName, request =>
+        {
+            seen = request;
+            return Task.FromResult(true);
+        });
+        var approverTask = approver.RunAsync(new StringReader(""), new StringWriter(), cts.Token);
+
+        // The approver only registers once the broker has captured its SID from the pipe.
+        while (!router.HasApprovers) await Task.Delay(20, cts.Token);
+
+        var ctx = new ElicitationContext("corr-pipe", "write-tool", "CALLER-SID", "hash-p",
+            new Dictionary<string, string> { ["Target"] = "x" }, CallerTainted: true);
+        var reply = await router.RequestAsync(ctx, TimeSpan.FromSeconds(5), cts.Token);
+
+        // The decision is attributed to the identity of the approver's connection, and the
+        // card data the approver saw includes the parameters and the caller's taint state.
+        Assert.True(reply.Approved);
+        Assert.Equal(CurrentUserSid, reply.DecidedBySid);
+        Assert.NotNull(seen);
+        Assert.Equal("CALLER-SID", seen.CallerSid);
+        Assert.Equal("x", seen.Parameters["Target"]);
+        Assert.True(seen.CallerTainted);
+
+        cts.Cancel();
+        try { await approverTask; } catch { }
+        try { await runTask; } catch (OperationCanceledException) { }
     }
 }
