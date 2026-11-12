@@ -1,7 +1,13 @@
+# Visual Studio cache & user-specific files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
 # .NET build output
 bin/
 obj/
-*.user
 
 # Generated JEA session/role configs (produced by JeaConfigGenerator)
 jea/generated/
@@ -11,3 +17,6 @@ jea/generated/
 
 # Local secrets / environment overrides
 appsettings.*.local.json
+
+# Private commercial agent skill package (distributed via Enterprise release zip only)
+skills/
