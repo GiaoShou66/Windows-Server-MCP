@@ -331,3 +331,22 @@ missing file rejected, unsigned file rejected — all against actual Windows API
   actual registered JEA endpoint, and the approval pipe's real SID-based ACL enforcement,
   still need a domain-joined Windows Server with a gMSA and registered endpoints — that
   infrastructure doesn't exist in this environment.
+
+---
+
+## Commercial Licensing, EULA & Turn-Key Deployment
+
+### Enterprise One-Click Installer
+Deploy and register the full broker appliance in under 3 minutes:
+```powershell
+# Run from elevated PowerShell console:
+.\deploy\Install-WindowsServerMcp.ps1 -DevMode -AutoTrustCert
+```
+For Active Directory Enterprise CA integration, follow [`docs/adcs-code-signing-guide.md`](docs/adcs-code-signing-guide.md).
+
+### Commercial EULA & Liability Disclaimer
+Use of this Software and the `ad-server-hygiene` Agent Skill Suite is governed by [`EULA.md`](EULA.md).
+
+> **核心維運責任法定聲明 / Core Operator Liability Mandate**:  
+> 「本 AI Agent Skill 僅提供維運決策輔助與合規建議。所有變更操作之最終法律與維運責任，歸屬於在 Broker.ApproverCli 終端中按下確認審批的人類操作員。」  
+> *"This AI Agent Skill and Windows-Server-MCP broker provide operational decision support and configuration recommendations only. All legal, compliance, and operational liability for mutating system changes remains exclusively with the human operator authorizing the execution card in the Broker.ApproverCli terminal."*
