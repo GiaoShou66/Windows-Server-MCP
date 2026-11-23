@@ -684,7 +684,7 @@ function Invoke-BrokerApply {
     if ($isAdmin) {
         Write-Log "Host is running elevated: registering JEA endpoints..."
         try {
-            & (Join-Path $RepoRoot 'deploy\register-jea.ps1') -GeneratedDir $GeneratedDir -ModulesSourceDir $ModulesDir
+            & (Join-Path $RepoRoot 'deploy\register-jea.ps1') -GeneratedDir $GeneratedDir -ModulesSourceDir $ModulesDir | Out-Null
             $results['JeaRegistration'] = 'Succeeded'
         }
         catch {
@@ -872,7 +872,7 @@ try {
             Write-Log "Running Full Auto-Configuration pipeline..."
             $discovery = Get-BrokerDiscovery
             $profile = New-BrokerPlan -DiscoveryData $discovery -IsDevMode:$DevMode
-            $applyResult = Invoke-BrokerApply -Profile $profile
+            $applyResult = Invoke-BrokerApply -Profile $profile | Select-Object -Last 1
             $val = Invoke-BrokerValidate
 
             $summary = [pscustomobject]@{
