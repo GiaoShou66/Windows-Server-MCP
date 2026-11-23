@@ -338,24 +338,61 @@ try {
         Write-Success "Verified OS compatibility: $osName (Build $osBuild)"
     }
 
-    # 1.3 Check Domain Membership & Resolve gMSA / Service Identity
+    # 1.3 Check Domain Membership & Resolve gMSA / Dedicated Service Identity
     $csInfo = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
     $isDomainJoined = [bool]$csInfo.PartOfDomain
     $domainName     = $csInfo.Domain
+    $localServiceCred = $null
 
     if ([string]::IsNullOrWhiteSpace($GmsaAccount)) {
         if ($isDomainJoined -and (-not $DevMode) -and (-not $NonInteractive) -and [Environment]::UserInteractive) {
-            $inputGmsa = Read-Host "  [?] Host is joined to domain '$domainName'. Enter gMSA account (e.g. $domainName\McpBrokerSvc$) or press Enter for 'NT AUTHORITY\SYSTEM'"
+            $inputGmsa = Read-Host "  [?] Host is joined to domain '$domainName'. Enter gMSA account (e.g. $domainName\McpBrokerSvc$) or press Enter for dedicated local service account"
             if (-not [string]::IsNullOrWhiteSpace($inputGmsa)) {
                 $GmsaAccount = $inputGmsa.Trim()
             }
-            else {
-                $GmsaAccount = "NT AUTHORITY\SYSTEM"
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($GmsaAccount)) {
+        # Provision dedicated non-admin local service account so WinRM/JEA Negotiate loopback works
+        # (NT AUTHORITY\SYSTEM cannot authenticate over workgroup NTLM loopback).
+        $localSvcName = "McpBrokerSvc"
+        $GmsaAccount  = "$env:COMPUTERNAME\$localSvcName"
+
+        $charSets = @(
+            "ABCDEFGHJKLMNPQRSTUVWXYZ",
+            "abcdefghijkmnopqrstuvwxyz",
+            "23456789",
+            "!@#%^&*-_=+"
+        )
+        $allChars = ($charSets -join "")
+        $bytes = New-Object byte[] 24
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+        $pwChars = New-Object char[] 24
+        for ($i = 0; $i -lt 4; $i++) {
+            $cs = $charSets[$i]
+            $pwChars[$i] = $cs[$bytes[$i] % $cs.Length]
+        }
+        for ($i = 4; $i -lt 24; $i++) {
+            $pwChars[$i] = $allChars[$bytes[$i] % $allChars.Length]
+        }
+        $rawPassword = -join $pwChars
+        $secPassword = ConvertTo-SecureString -String $rawPassword -AsPlainText -Force
+
+        $existingLocalSvc = Get-LocalUser -Name $localSvcName -ErrorAction SilentlyContinue
+        if ($existingLocalSvc) {
+            Set-LocalUser -Name $localSvcName -Password $secPassword -PasswordNeverExpires $true -UserMayNotChangePassword $true | Out-Null
+            if (-not $existingLocalSvc.Enabled) {
+                Enable-LocalUser -Name $localSvcName | Out-Null
             }
+            Write-Info "Updated dedicated local service account '$GmsaAccount' with rotated credential"
         }
         else {
-            $GmsaAccount = "NT AUTHORITY\SYSTEM"
+            New-LocalUser -Name $localSvcName -Password $secPassword -FullName "MCP Broker Service" -Description "Windows-Server-MCP service identity" -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
+            Write-Info "Created dedicated local service account '$GmsaAccount'"
         }
+        $localServiceCred = New-Object System.Management.Automation.PSCredential($GmsaAccount, $secPassword)
     }
     Write-Success "Configured Windows Service identity: $GmsaAccount"
 
@@ -546,6 +583,12 @@ try {
         if ($existingMembers -notcontains $svcMember) {
             Write-Info "Adding broker service identity '$svcMember' to 'McpBrokerServiceGroup'..."
             Add-LocalGroupMember -Group "McpBrokerServiceGroup" -Member $svcMember -ErrorAction Stop
+        }
+        if ($null -ne $localServiceCred -and (Get-LocalGroup -Name "Remote Management Users" -ErrorAction SilentlyContinue)) {
+            $rmuMembers = @(Get-LocalGroupMember -Group "Remote Management Users" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+            if ($rmuMembers -notcontains $svcMember) {
+                Add-LocalGroupMember -Group "Remote Management Users" -Member $svcMember -ErrorAction SilentlyContinue
+            }
         }
         Write-Success "Verified dedicated JEA access group: $AccessGroup (member: $svcMember)"
     }
@@ -831,20 +874,35 @@ try {
         Start-Sleep -Seconds 1
     }
 
+    # Ensure EventLog source exists so non-admin service accounts can log to Application log
+    try {
+        if (-not [System.Diagnostics.EventLog]::SourceExists("Broker.Host")) {
+            New-EventLog -LogName Application -Source "Broker.Host" -ErrorAction SilentlyContinue
+        }
+    }
+    catch { }
+
     $quotedBinPath = "`"$brokerHostExe`" --contentRoot `"$BinDir`""
-    if ($GmsaAccount -eq "NT AUTHORITY\SYSTEM" -or $GmsaAccount -eq "LocalSystem") {
+    if ($null -ne $localServiceCred) {
+        Write-Info "Creating Windows Service '$ServiceName' running as dedicated account '$GmsaAccount' (start= auto)..."
+        New-Service -Name $ServiceName -BinaryPathName $quotedBinPath -Credential $localServiceCred -StartupType Automatic -DisplayName "Windows Server MCP Broker" -Description "Centralized, JEA-boundaried Model Context Protocol (MCP) broker appliance for Windows Server." | Out-Null
+    }
+    elseif ($GmsaAccount -eq "NT AUTHORITY\SYSTEM" -or $GmsaAccount -eq "LocalSystem") {
         Write-Info "Creating Windows Service '$ServiceName' running as LocalSystem (start= auto)..."
         & sc.exe create $ServiceName binPath= $quotedBinPath start= auto obj= "LocalSystem" DisplayName= "Windows Server MCP Broker" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "sc.exe create failed with exit code $LASTEXITCODE."
+        }
+        & sc.exe description $ServiceName "Centralized, JEA-boundaried Model Context Protocol (MCP) broker appliance for Windows Server." | Out-Null
     }
     else {
         Write-Info "Creating Windows Service '$ServiceName' running under gMSA '$GmsaAccount' (start= auto)..."
         & sc.exe create $ServiceName binPath= $quotedBinPath start= auto obj= $GmsaAccount DisplayName= "Windows Server MCP Broker" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "sc.exe create failed with exit code $LASTEXITCODE."
+        }
+        & sc.exe description $ServiceName "Centralized, JEA-boundaried Model Context Protocol (MCP) broker appliance for Windows Server." | Out-Null
     }
-    if ($LASTEXITCODE -ne 0) {
-        throw "sc.exe create failed with exit code $LASTEXITCODE."
-    }
-
-    & sc.exe description $ServiceName "Centralized, JEA-boundaried Model Context Protocol (MCP) broker appliance for Windows Server." | Out-Null
     & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
 
     Write-Info "Starting Windows Service '$ServiceName'..."
