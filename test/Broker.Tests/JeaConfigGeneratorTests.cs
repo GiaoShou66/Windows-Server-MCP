@@ -74,6 +74,7 @@ public sealed class JeaConfigGeneratorTests : IDisposable
         Assert.Contains("'rc1'", pssc);
         Assert.Contains("'rc2'", pssc);
         Assert.Contains("'GROUP' = @{", pssc); // RoleDefinitions keyed on the real access group
+        Assert.Contains("ExecutionPolicy = 'AllSigned'", pssc); // Signed .psm1 wrappers require AllSigned, not Restricted
     }
 
     [Fact]

@@ -179,7 +179,7 @@ public sealed class JeaConfigGenerator
         {{roleDefs}}
             }
             LanguageMode = 'NoLanguage'
-            ExecutionPolicy = 'Restricted'
+            ExecutionPolicy = 'AllSigned'
             MountUserDrive = $false
         }
         """;
