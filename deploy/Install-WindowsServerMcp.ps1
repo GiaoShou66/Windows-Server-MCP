@@ -382,7 +382,7 @@ try {
 
         $existingLocalSvc = Get-LocalUser -Name $localSvcName -ErrorAction SilentlyContinue
         if ($existingLocalSvc) {
-            Set-LocalUser -Name $localSvcName -Password $secPassword -PasswordNeverExpires $true -UserMayNotChangePassword $true | Out-Null
+            Set-LocalUser -Name $localSvcName -Password $secPassword -PasswordNeverExpires $true -UserMayChangePassword $false | Out-Null
             if (-not $existingLocalSvc.Enabled) {
                 Enable-LocalUser -Name $localSvcName | Out-Null
             }
