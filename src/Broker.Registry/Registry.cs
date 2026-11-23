@@ -403,10 +403,27 @@ public sealed class SignatureVerifier : ISignatureVerifier
 
     private static string? ResolveModulePath(string moduleName)
     {
-        var pathEntries = (Environment.GetEnvironmentVariable("PSModulePath") ?? "")
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var roots = new List<string>();
 
-        foreach (var root in pathEntries)
+        foreach (var target in new[] { EnvironmentVariableTarget.Process, EnvironmentVariableTarget.Machine })
+        {
+            var raw = Environment.GetEnvironmentVariable("PSModulePath", target) ?? "";
+            foreach (var entry in raw.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var expanded = Environment.ExpandEnvironmentVariables(entry);
+                if (seen.Add(expanded))
+                    roots.Add(expanded);
+            }
+        }
+
+        var defaultPsModules = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "WindowsPowerShell", "Modules");
+        if (seen.Add(defaultPsModules))
+            roots.Add(defaultPsModules);
+
+        foreach (var root in roots)
         {
             var candidate = Path.Combine(root, moduleName, $"{moduleName}.psm1");
             if (File.Exists(candidate))

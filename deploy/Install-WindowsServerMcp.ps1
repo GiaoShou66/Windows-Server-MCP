@@ -394,6 +394,16 @@ try {
         }
         $localServiceCred = New-Object System.Management.Automation.PSCredential($GmsaAccount, $secPassword)
 
+        # New-LocalUser does NOT automatically add accounts to BUILTIN\Users (S-1-5-32-545),
+        # which is required to read C:\Program Files\WindowsPowerShell\Modules.
+        $usersGroupName = (New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")).Translate([System.Security.Principal.NTAccount]).Value
+        $usersShortName = $usersGroupName -replace '^.*\\', ''
+        $existingUsers = @(Get-LocalGroupMember -Group $usersShortName -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+        if ($existingUsers -notcontains $GmsaAccount) {
+            Add-LocalGroupMember -Group $usersShortName -Member $GmsaAccount -ErrorAction Stop
+            Write-Info "Added '$GmsaAccount' to '$usersGroupName' for Program Files module read access"
+        }
+
         # Grant SeServiceLogonRight ("Log on as a service") via secedit (New-Service does not grant it automatically)
         $svcSid = (New-Object System.Security.Principal.NTAccount($GmsaAccount)).Translate([System.Security.Principal.SecurityIdentifier]).Value
         $tmpInf = Join-Path $env:TEMP "mcp_svc_rights_$([guid]::NewGuid().ToString('N')).inf"
@@ -989,6 +999,16 @@ try {
     Write-Success "Disjoint Caller & Approver SIDs  : $($valObj.Checks.ApproverSidsDisjoint)"
     Write-Success "JEA Role & Session Configs Ready : $($valObj.Checks.JeaArtifactsPresent) ($($valObj.Checks.GeneratedRoleCapabilitiesCount) .psrc, $($valObj.Checks.GeneratedSessionConfigsCount) .pssc)"
     Write-Success "Broker.Host.exe Self-Check       : PASSED (Exit Code 0)"
+
+    $svcAfterCheck = Get-Service -Name $ServiceName -ErrorAction Stop
+    if ($svcAfterCheck.Status -ne 'Running') {
+        $recentEvt = Get-WinEvent -FilterHashtable @{ LogName = 'System', 'Application'; StartTime = (Get-Date).AddMinutes(-2) } -MaxEvents 12 -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -match 'Broker|Mcp|Service Control Manager' } |
+            Select-Object -First 5 |
+            ForEach-Object { "[$($_.LogName)/$($_.ProviderName)] $($_.Message)" }
+        throw "Service '$ServiceName' stopped unexpectedly after startup (Status: $($svcAfterCheck.Status)).`n$($recentEvt -join "`n")"
+    }
+    Write-Success "Windows Service Runtime Check    : Running"
 
     # =========================================================================
     # STEP 8: OUTPUT SUMMARY & CLIENT CONFIGURATION SNIPPETS
