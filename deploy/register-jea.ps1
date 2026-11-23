@@ -30,12 +30,19 @@ function Assert-ProtectedDirectory {
         'NT AUTHORITY\Authenticated Users',
         'BUILTIN\Users'
     )
+    # Check only mutation bits (avoid compound Read/Synchronize bits shared by Modify/FullControl).
+    $writeMask = [int](
+        [System.Security.AccessControl.FileSystemRights]::Write -bor
+        [System.Security.AccessControl.FileSystemRights]::Delete -bor
+        [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [System.Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [System.Security.AccessControl.FileSystemRights]::TakeOwnership
+    ) -bor 0x40000000 -bor 0x10000000 # GENERIC_WRITE | GENERIC_ALL
+
     foreach ($rule in $acl.Access) {
         if ($rule.AccessControlType -eq 'Allow' -and
             ($broadPrincipals -contains $rule.IdentityReference.Value) -and
-            (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Write) -ne 0 -or
-            ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify) -ne 0 -or
-            ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne 0)) {
+            (([int]$rule.FileSystemRights -band $writeMask) -ne 0)) {
             throw "Refusing to use ACL-writable module directory '$Path' for JEA code."
         }
     }
