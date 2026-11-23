@@ -519,7 +519,7 @@ try {
     if ($AccessGroup -eq "McpBrokerServiceGroup") {
         if (-not (Get-LocalGroup -Name "McpBrokerServiceGroup" -ErrorAction SilentlyContinue)) {
             Write-Info "Creating dedicated local security group 'McpBrokerServiceGroup' (Invariant 3 compliance)..."
-            New-LocalGroup -Name "McpBrokerServiceGroup" -Description "Dedicated JEA endpoint access group for Windows-Server-MCP Broker Service." | Out-Null
+            New-LocalGroup -Name "McpBrokerServiceGroup" -Description "Windows-Server-MCP JEA access group" | Out-Null
         }
         Write-Success "Verified dedicated JEA access group: $AccessGroup"
     }
