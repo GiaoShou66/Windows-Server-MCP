@@ -393,6 +393,45 @@ try {
             Write-Info "Created dedicated local service account '$GmsaAccount'"
         }
         $localServiceCred = New-Object System.Management.Automation.PSCredential($GmsaAccount, $secPassword)
+
+        # Grant SeServiceLogonRight ("Log on as a service") via secedit (New-Service does not grant it automatically)
+        $svcSid = (New-Object System.Security.Principal.NTAccount($GmsaAccount)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        $tmpInf = Join-Path $env:TEMP "mcp_svc_rights_$([guid]::NewGuid().ToString('N')).inf"
+        $tmpSdb = Join-Path $env:TEMP "mcp_svc_rights_$([guid]::NewGuid().ToString('N')).sdb"
+        try {
+            & secedit.exe /export /cfg $tmpInf /areas USER_RIGHTS /quiet | Out-Null
+            $infLines = Get-Content -LiteralPath $tmpInf -Encoding Unicode
+            $foundRight = $false
+            $updatedLines = foreach ($line in $infLines) {
+                if ($line -match '^SeServiceLogonRight\s*=\s*(.*)$') {
+                    $foundRight = $true
+                    $existing = $Matches[1].Trim()
+                    if ($existing -notmatch [regex]::Escape($svcSid)) {
+                        if ([string]::IsNullOrWhiteSpace($existing)) {
+                            "SeServiceLogonRight = *$svcSid"
+                        }
+                        else {
+                            "SeServiceLogonRight = $existing,*$svcSid"
+                        }
+                    }
+                    else {
+                        $line
+                    }
+                }
+                else {
+                    $line
+                }
+            }
+            if (-not $foundRight) {
+                $updatedLines = @($updatedLines) + "SeServiceLogonRight = *$svcSid"
+            }
+            [System.IO.File]::WriteAllLines($tmpInf, $updatedLines, [System.Text.Encoding]::Unicode)
+            & secedit.exe /configure /db $tmpSdb /cfg $tmpInf /areas USER_RIGHTS /quiet | Out-Null
+            Write-Info "Granted SeServiceLogonRight to '$GmsaAccount' ($svcSid)"
+        }
+        finally {
+            Remove-Item -LiteralPath $tmpInf, $tmpSdb -Force -ErrorAction SilentlyContinue
+        }
     }
     Write-Success "Configured Windows Service identity: $GmsaAccount"
 
@@ -906,7 +945,17 @@ try {
     & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
 
     Write-Info "Starting Windows Service '$ServiceName'..."
-    Start-Service -Name $ServiceName -ErrorAction Stop
+    try {
+        Start-Service -Name $ServiceName -ErrorAction Stop
+    }
+    catch {
+        $recentEvt = Get-WinEvent -FilterHashtable @{ LogName = 'System', 'Application'; StartTime = (Get-Date).AddMinutes(-2) } -MaxEvents 10 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match [regex]::Escape($ServiceName) -or $_.ProviderName -match 'Broker|Service Control Manager' } |
+            Select-Object -First 3 |
+            ForEach-Object { "[$($_.LogName)/$($_.Id)] $($_.Message)" }
+        $detail = if ($recentEvt) { "`nRecent EventLog details:`n$($recentEvt -join "`n")" } else { "" }
+        throw "$($_.Exception.Message)$detail"
+    }
     Start-Sleep -Seconds 2
     $svcState = Get-Service -Name $ServiceName
     Write-Success "Service '$ServiceName' is $($svcState.Status) (StartType: $($svcState.StartType))"
