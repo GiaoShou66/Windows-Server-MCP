@@ -673,6 +673,7 @@ function Invoke-BrokerApply {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $isAdmin = ([System.Security.Principal.WindowsPrincipal]$identity).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
     $results['IsElevated'] = $isAdmin
+    $results['RequiredElevationCommands'] = @()
 
     if ($isAdmin) {
         Write-Log "Host is running elevated: registering JEA endpoints..."
