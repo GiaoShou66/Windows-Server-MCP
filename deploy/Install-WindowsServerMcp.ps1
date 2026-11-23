@@ -853,8 +853,15 @@ try {
     Write-StepHeader -StepNumber 7 -TotalSteps $TotalSteps -Title "Running Post-Deployment Health & Security Gate Verification"
 
     Write-Info "Executing deploy\auto-configure.ps1 -Validate..."
-    $valJsonRaw = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $autoConfigScript -Validate -RepoRoot $TargetDir -SkipTests 2>$null
-    $valObj = $valJsonRaw | ConvertFrom-Json
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $valJsonRaw = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $autoConfigScript -Validate -RepoRoot $TargetDir -SkipTests 2>$null
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+    $valObj = ($valJsonRaw -join "`n") | ConvertFrom-Json
 
     Write-Info "Executing Broker.Host.exe self-check..."
     $selfCheckRes = Invoke-NativeCaptured -FilePath $brokerHostExe -ArgumentList @("self-check", $binAppSettingsPath)
