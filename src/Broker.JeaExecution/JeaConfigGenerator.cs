@@ -62,8 +62,10 @@ public sealed class JeaConfigGenerator
     {
         var paramConstraints = tool.Parameters.Select(BuildParameterConstraint);
         var paramBlock = string.Join(",\n                    ", paramConstraints);
+        // JEA requires every hashtable entry in VisibleCmdlets to declare both 'Name' and 'Parameters' keys,
+        // even when a cmdlet takes zero parameters (Parameters = @()).
         var paramsClause = tool.Parameters.Count == 0
-            ? ""
+            ? "\n                Parameters = @()"
             : $"\n                Parameters = @(\n                    {paramBlock}\n                )";
 
         if (string.IsNullOrWhiteSpace(tool.JeaMapping.ModuleName))

@@ -117,6 +117,7 @@ public sealed class JeaConfigGeneratorTests : IDisposable
 
         Assert.Contains("ModulesToImport = @('MyModule.Get-A')", psrc);
         Assert.Contains("Name = 'Get-A'", psrc);
+        Assert.Contains("Parameters = @()", psrc);
     }
 
     [Fact]
