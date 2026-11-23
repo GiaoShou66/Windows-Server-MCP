@@ -151,6 +151,26 @@ function Write-Fail {
     Write-Host ("  [-] {0}" -f $Message) -ForegroundColor Red
 }
 
+function Invoke-NativeCaptured {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter()][string[]]$ArgumentList = @()
+    )
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $lines = & $FilePath @ArgumentList 2>&1 | ForEach-Object { $_.ToString() }
+        $exitCode = $LASTEXITCODE
+        return [PSCustomObject]@{
+            ExitCode = $exitCode
+            Output   = ($lines -join [Environment]::NewLine)
+        }
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 function Get-Sha256Hex {
     param([Parameter(Mandatory = $true)][string]$Path)
     $hasher = [System.Security.Cryptography.SHA256]::Create()
@@ -581,9 +601,9 @@ try {
     if (-not $SkipBuild) {
         foreach ($proj in $projectsToPublish) {
             Write-Info "Publishing $($proj.Name) (Release) -> $BinDir ..."
-            $pubOut = & dotnet publish $proj.Path -c Release -o $BinDir --nologo 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to publish $($proj.Name) (Exit code $LASTEXITCODE):`n$pubOut"
+            $pubRes = Invoke-NativeCaptured -FilePath "dotnet" -ArgumentList @("publish", $proj.Path, "-c", "Release", "-o", $BinDir, "--nologo")
+            if ($pubRes.ExitCode -ne 0) {
+                throw "Failed to publish $($proj.Name) (Exit code $($pubRes.ExitCode)):`n$($pubRes.Output)"
             }
         }
         Write-Success "Compiled and staged Broker.Host, Broker.McpAdapter, and Broker.ApproverCli to $BinDir"
@@ -735,9 +755,9 @@ try {
     Set-HardenedDirectoryAcl -Path $stagedHostBin -ServicePrincipal $GmsaAccount
     Copy-Item -Path (Join-Path $BinDir "*") -Destination $stagedHostBin -Recurse -Force
 
-    $autoOut = & powershell.exe @autoConfigArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "auto-configure.ps1 -Full failed (Exit code $LASTEXITCODE):`n$autoOut"
+    $autoRes = Invoke-NativeCaptured -FilePath "powershell.exe" -ArgumentList $autoConfigArgs
+    if ($autoRes.ExitCode -ne 0) {
+        throw "auto-configure.ps1 -Full failed (Exit code $($autoRes.ExitCode)):`n$($autoRes.Output)"
     }
 
     # Ensure generated JEA files are present and registered via register-jea.ps1
@@ -823,10 +843,9 @@ try {
     $valObj = $valJsonRaw | ConvertFrom-Json
 
     Write-Info "Executing Broker.Host.exe self-check..."
-    $selfCheckRaw = & $brokerHostExe self-check $binAppSettingsPath 2>&1
-    $selfCheckExit = $LASTEXITCODE
-    if ($selfCheckExit -ne 0) {
-        throw "Broker.Host.exe self-check failed (Exit code $selfCheckExit):`n$selfCheckRaw"
+    $selfCheckRes = Invoke-NativeCaptured -FilePath $brokerHostExe -ArgumentList @("self-check", $binAppSettingsPath)
+    if ($selfCheckRes.ExitCode -ne 0) {
+        throw "Broker.Host.exe self-check failed (Exit code $($selfCheckRes.ExitCode)):`n$($selfCheckRes.Output)"
     }
 
     Write-Success "Manifest Integrity Sidecar Match : $($valObj.Checks.ManifestIntegrityMatches)"
