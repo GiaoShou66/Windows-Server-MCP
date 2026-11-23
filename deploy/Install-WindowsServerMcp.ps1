@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 #Requires -Version 5.1
 <#
 .SYNOPSIS
@@ -38,7 +38,7 @@
 
 .PARAMETER ApproverSids
   SIDs allowed to connect to the out-of-band approval pipe (\\.\pipe\McpBroker.Approvals).
-  Must be strictly disjoint from CallerSids (Invariant 1: CallerSids ∩ ApproverSids = ∅).
+  Must be strictly disjoint from CallerSids (Invariant 1: CallerSids and ApproverSids must not overlap).
 
 .PARAMETER DevMode
   Enables development/evaluation mode (self-signed certificate, current user SID as caller, synthetic disjoint approver SID).
@@ -307,7 +307,7 @@ try {
     }
     Write-Success "Running elevated as '$currentUserName' (SID: $currentUserSid)"
 
-    # 1.2 Check Windows OS Version (Windows Server 2022 / 2025 or Windows 11 — Build >= 20348)
+    # 1.2 Check Windows OS Version (Windows Server 2022 / 2025 or Windows 11 - Build >= 20348)
     $osInfo  = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
     $osBuild = [int]$osInfo.BuildNumber
     $osName  = $osInfo.Caption
@@ -414,7 +414,7 @@ try {
     $callerHashSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$CallerSids, [System.StringComparer]::OrdinalIgnoreCase)
     $overlappingSids = @($ApproverSids | Where-Object { $callerHashSet.Contains($_) })
     if ($overlappingSids.Count -gt 0) {
-        throw "Invariant 1 Violation (CallerSids ∩ ApproverSids = ∅): CallerSids and ApproverSids cannot overlap. Overlapping SID(s): $($overlappingSids -join ', ')"
+        throw "Invariant 1 Violation: CallerSids and ApproverSids cannot overlap. Overlapping SID(s): $($overlappingSids -join ', ')"
     }
     Write-Success "Verified Invariant 1 (Disjoint Caller & Approver Identities)"
 
@@ -848,18 +848,18 @@ try {
     $approverCliPath     = Join-Path $BinDir "Broker.ApproverCli.exe"
 
     Write-Host ""
-    Write-Host "╔══════════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║         WINDOWS-SERVER-MCP APPLIANCE DEPLOYMENT COMPLETED SUCCESSFULLY       ║" -ForegroundColor Green
-    Write-Host "╚══════════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "+==============================================================================+" -ForegroundColor Green
+    Write-Host "|         WINDOWS-SERVER-MCP APPLIANCE DEPLOYMENT COMPLETED SUCCESSFULLY       |" -ForegroundColor Green
+    Write-Host "+==============================================================================+" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Deployment Summary:" -ForegroundColor White
-    Write-Host ("    • Installation Path   : {0}" -f $TargetDir) -ForegroundColor Gray
-    Write-Host ("    • Windows Service     : {0} [{1} / {2}]" -f $ServiceName, $svcState.Status, $svcState.StartType) -ForegroundColor Green
-    Write-Host ("    • Service Identity    : {0}" -f $GmsaAccount) -ForegroundColor Gray
-    Write-Host ("    • Signing Thumbprint  : {0}" -f $CertThumbprint) -ForegroundColor Gray
-    Write-Host ("    • Allowed Caller SIDs : {0}" -f ($CallerSids -join ", ")) -ForegroundColor Gray
-    Write-Host ("    • Approver SIDs       : {0}" -f ($ApproverSids -join ", ")) -ForegroundColor Gray
-    Write-Host ("    • Elapsed Time        : {0} seconds" -f $elapsedSec) -ForegroundColor Cyan
+    Write-Host ("    * Installation Path   : {0}" -f $TargetDir) -ForegroundColor Gray
+    Write-Host ("    * Windows Service     : {0} [{1} / {2}]" -f $ServiceName, $svcState.Status, $svcState.StartType) -ForegroundColor Green
+    Write-Host ("    * Service Identity    : {0}" -f $GmsaAccount) -ForegroundColor Gray
+    Write-Host ("    * Signing Thumbprint  : {0}" -f $CertThumbprint) -ForegroundColor Gray
+    Write-Host ("    * Allowed Caller SIDs : {0}" -f ($CallerSids -join ", ")) -ForegroundColor Gray
+    Write-Host ("    * Approver SIDs       : {0}" -f ($ApproverSids -join ", ")) -ForegroundColor Gray
+    Write-Host ("    * Elapsed Time        : {0} seconds" -f $elapsedSec) -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Human-in-the-Loop Approver Console (Run as Authorized Approver):" -ForegroundColor Yellow
     Write-Host ("    `"{0}`" --pipe McpBroker.Approvals" -f $approverCliPath) -ForegroundColor White
