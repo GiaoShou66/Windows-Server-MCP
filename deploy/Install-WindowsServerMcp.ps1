@@ -541,7 +541,13 @@ try {
             Write-Info "Creating dedicated local security group 'McpBrokerServiceGroup' (Invariant 3 compliance)..."
             New-LocalGroup -Name "McpBrokerServiceGroup" -Description "Windows-Server-MCP JEA access group" | Out-Null
         }
-        Write-Success "Verified dedicated JEA access group: $AccessGroup"
+        $svcMember = if ($GmsaAccount -eq "LocalSystem") { "NT AUTHORITY\SYSTEM" } else { $GmsaAccount }
+        $existingMembers = @(Get-LocalGroupMember -Group "McpBrokerServiceGroup" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+        if ($existingMembers -notcontains $svcMember) {
+            Write-Info "Adding broker service identity '$svcMember' to 'McpBrokerServiceGroup'..."
+            Add-LocalGroupMember -Group "McpBrokerServiceGroup" -Member $svcMember -ErrorAction Stop
+        }
+        Write-Success "Verified dedicated JEA access group: $AccessGroup (member: $svcMember)"
     }
 
     # =========================================================================

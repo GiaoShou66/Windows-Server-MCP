@@ -45,11 +45,12 @@ public sealed class JeaEndpointClient
         var effectiveCt = timeoutCts.Token;
 
         // Loopback WSMan connection into the named JEA session configuration.
+        // AuthenticationMechanism.Default uses Negotiate (Kerberos on domain hosts, NTLM on workgroup/LocalSystem loopback).
         var connInfo = new WSManConnectionInfo
         {
             ComputerName = "localhost",
             ShellUri = $"http://schemas.microsoft.com/powershell/{tool.JeaMapping.EndpointName}",
-            AuthenticationMechanism = AuthenticationMechanism.Kerberos
+            AuthenticationMechanism = AuthenticationMechanism.Default
         };
 
         using var runspace = RunspaceFactory.CreateRunspace(connInfo);
