@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -13,13 +13,17 @@ function Get-BrokerPrinters {
 
     Import-Module PrintManagement -ErrorAction Stop
 
-    Get-Printer -ErrorAction Stop | Select-Object -First 500 | ForEach-Object {
+    $count = 0
+    foreach ($printer in @(Get-Printer -ErrorAction Stop)) {
+        if ($null -eq $printer) { continue }
+        if ($count -ge 500) { break }
+        $count++
         [pscustomobject]@{
-            Name          = $_.Name
-            DriverName    = $_.DriverName
-            PortName      = $_.PortName
-            Shared        = $_.Shared
-            PrinterStatus = $_.PrinterStatus.ToString()
+            Name          = $printer.Name
+            DriverName    = $printer.DriverName
+            PortName      = $printer.PortName
+            Shared        = $printer.Shared
+            PrinterStatus = $printer.PrinterStatus.ToString()
         }
     }
 }

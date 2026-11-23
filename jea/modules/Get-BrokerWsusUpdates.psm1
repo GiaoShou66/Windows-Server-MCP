@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -17,12 +17,16 @@ function Get-BrokerWsusUpdates {
     $scope = New-Object Microsoft.UpdateServices.Administration.UpdateScope
     $scope.ApprovedStates = [Microsoft.UpdateServices.Administration.ApprovedStates]::NotApproved
 
-    $wsus.GetUpdates($scope) | Select-Object -First 200 | ForEach-Object {
+    $count = 0
+    foreach ($update in @($wsus.GetUpdates($scope))) {
+        if ($null -eq $update) { continue }
+        if ($count -ge 200) { break }
+        $count++
         [pscustomobject]@{
-            Title                 = $_.Title
-            Classification        = $_.UpdateClassificationTitle
-            KnowledgeBaseArticles = ($_.KnowledgeBaseArticles -join ',')
-            IsDeclined            = $_.IsDeclined
+            Title                 = $update.Title
+            Classification        = $update.UpdateClassificationTitle
+            KnowledgeBaseArticles = ($update.KnowledgeBaseArticles -join ',')
+            IsDeclined            = $update.IsDeclined
         }
     }
 }

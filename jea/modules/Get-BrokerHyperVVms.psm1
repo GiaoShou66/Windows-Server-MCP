@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -13,13 +13,17 @@ function Get-BrokerHyperVVms {
 
     Import-Module Hyper-V -ErrorAction Stop
 
-    Get-VM -ErrorAction Stop | Select-Object -First 500 | ForEach-Object {
+    $count = 0
+    foreach ($vm in @(Get-VM -ErrorAction Stop)) {
+        if ($null -eq $vm) { continue }
+        if ($count -ge 500) { break }
+        $count++
         [pscustomobject]@{
-            Name                = $_.Name
-            State               = $_.State.ToString()
-            CPUUsage            = $_.CPUUsage
-            MemoryAssignedBytes = $_.MemoryAssigned
-            Uptime              = $_.Uptime.ToString()
+            Name                = $vm.Name
+            State               = $vm.State.ToString()
+            CPUUsage            = $vm.CPUUsage
+            MemoryAssignedBytes = $vm.MemoryAssigned
+            Uptime              = $vm.Uptime.ToString()
         }
     }
 }

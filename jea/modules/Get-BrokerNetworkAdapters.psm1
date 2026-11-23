@@ -14,8 +14,8 @@ function Get-BrokerNetworkAdapters {
 
     Get-NetAdapter -ErrorAction Stop | ForEach-Object {
         $adapter = $_
-        $ip = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-            Select-Object -First 1 -ExpandProperty IPAddress
+        $ips = @(Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue)
+        $ip = if ($ips.Count -gt 0 -and $null -ne $ips[0]) { $ips[0].IPAddress } else { $null }
 
         [pscustomobject]@{
             Name        = $adapter.Name

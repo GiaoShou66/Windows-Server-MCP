@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -24,8 +24,9 @@ function Set-BrokerAdComputerEnabled {
 
     # -Identity accepts DNs, GUIDs and SIDs as well as names; bind to the explicit name
     # form so a caller cannot address a domain controller by its SID and skip the check.
-    $computer = Get-ADComputer -Filter 'Name -eq $ComputerName' `
-        -Properties Enabled, ObjectGuid, SID -ErrorAction Stop | Select-Object -First 1
+    $computers = @(Get-ADComputer -Filter 'Name -eq $ComputerName' `
+        -Properties Enabled, ObjectGuid, SID -ErrorAction Stop)
+    $computer = if ($computers.Count -gt 0) { $computers[0] } else { $null }
     if (-not $computer) {
         throw "Computer '$ComputerName' not found."
     }

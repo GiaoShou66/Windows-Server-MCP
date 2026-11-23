@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -13,12 +13,16 @@ function Get-BrokerSmbShares {
 
     Import-Module SmbShare -ErrorAction Stop
 
-    Get-SmbShare -ErrorAction Stop | Select-Object -First 500 | ForEach-Object {
+    $count = 0
+    foreach ($share in @(Get-SmbShare -ErrorAction Stop)) {
+        if ($null -eq $share) { continue }
+        if ($count -ge 500) { break }
+        $count++
         [pscustomobject]@{
-            Name        = $_.Name
-            Path        = $_.Path
-            Description = $_.Description
-            ShareType   = $_.ShareType.ToString()
+            Name        = $share.Name
+            Path        = $share.Path
+            Description = $share.Description
+            ShareType   = $share.ShareType.ToString()
         }
     }
 }

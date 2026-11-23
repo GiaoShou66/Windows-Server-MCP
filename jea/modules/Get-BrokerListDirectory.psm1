@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -74,13 +74,17 @@ function Get-BrokerListDirectory {
         }
     }
 
-    Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | Select-Object -First 500 | ForEach-Object {
+    $count = 0
+    foreach ($entry in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
+        if ($null -eq $entry) { continue }
+        if ($count -ge 500) { break }
+        $count++
         [pscustomobject]@{
-            Name          = $_.Name
-            FullName      = $_.FullName
-            IsDirectory   = $_.PSIsContainer
-            LengthBytes   = if ($_.PSIsContainer) { $null } else { $_.Length }
-            LastWriteTime = $_.LastWriteTime
+            Name          = $entry.Name
+            FullName      = $entry.FullName
+            IsDirectory   = $entry.PSIsContainer
+            LengthBytes   = if ($entry.PSIsContainer) { $null } else { $entry.Length }
+            LastWriteTime = $entry.LastWriteTime
         }
     }
 }

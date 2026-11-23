@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -17,13 +17,17 @@ function Get-BrokerGroupPolicies {
 
     Import-Module GroupPolicy -ErrorAction Stop
 
-    Get-GPO -All -ErrorAction Stop | Select-Object -First 500 | ForEach-Object {
+    $count = 0
+    foreach ($gpo in @(Get-GPO -All -ErrorAction Stop)) {
+        if ($null -eq $gpo) { continue }
+        if ($count -ge 500) { break }
+        $count++
         [pscustomobject]@{
-            DisplayName      = $_.DisplayName
-            Id               = $_.Id
-            GpoStatus        = $_.GpoStatus.ToString()
-            CreationTime     = $_.CreationTime
-            ModificationTime = $_.ModificationTime
+            DisplayName      = $gpo.DisplayName
+            Id               = $gpo.Id
+            GpoStatus        = $gpo.GpoStatus.ToString()
+            CreationTime     = $gpo.CreationTime
+            ModificationTime = $gpo.ModificationTime
         }
     }
 }

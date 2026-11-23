@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 <#
@@ -13,13 +13,17 @@ function Get-BrokerFirewallRules {
 
     Import-Module NetSecurity -ErrorAction Stop
 
-    Get-NetFirewallRule -Enabled True -ErrorAction Stop | Select-Object -First 500 | ForEach-Object {
+    $count = 0
+    foreach ($rule in @(Get-NetFirewallRule -Enabled True -ErrorAction Stop)) {
+        if ($null -eq $rule) { continue }
+        if ($count -ge 500) { break }
+        $count++
         [pscustomobject]@{
-            Name        = $_.Name
-            DisplayName = $_.DisplayName
-            Direction   = $_.Direction.ToString()
-            Action      = $_.Action.ToString()
-            Profile     = $_.Profile.ToString()
+            Name        = $rule.Name
+            DisplayName = $rule.DisplayName
+            Direction   = $rule.Direction.ToString()
+            Action      = $rule.Action.ToString()
+            Profile     = $rule.Profile.ToString()
         }
     }
 }
