@@ -703,13 +703,27 @@ try {
     }
     Write-Success "Authenticode-signed $signedModuleCount JEA wrapper modules (SHA-256)"
 
-    # Prepare manifest in $TargetDir\policy\manifest.json with actual target paths, thumbprint, and accessGroup
+    # Prepare manifest in $TargetDir\policy\manifest.json with actual target paths, thumbprint, accessGroup, and gMSA/virtual-account mode
+    $hasDomainGmsa = (-not $DevMode) -and ($GmsaAccount -match '^[^\\]+\\[^\\]+\$$')
     $manifestObj = Get-Content -LiteralPath $dstManifest -Raw | ConvertFrom-Json
     foreach ($tool in $manifestObj.tools) {
         $tool.server.signatureThumbprint = $CertThumbprint
         $modFile = "$($tool.jeaMapping.moduleName).psm1"
         $tool.server.path = Join-Path $JeaDir $modFile
         $tool.jeaMapping.accessGroup = $AccessGroup
+
+        if ($hasDomainGmsa) {
+            if ($tool.jeaMapping.PSObject.Properties.Match('useGmsa').Count -gt 0 -and $tool.jeaMapping.useGmsa) {
+                $tool.jeaMapping | Add-Member -NotePropertyName 'gmsaAccount' -NotePropertyValue $GmsaAccount -Force
+            }
+        }
+        else {
+            # DevMode or non-gMSA host: fall back to JEA virtual account with explicit empty group list
+            $tool.jeaMapping | Add-Member -NotePropertyName 'useGmsa' -NotePropertyValue $false -Force
+            if ($tool.jeaMapping.PSObject.Properties.Match('virtualAccountGroups').Count -eq 0 -or $null -eq $tool.jeaMapping.virtualAccountGroups) {
+                $tool.jeaMapping | Add-Member -NotePropertyName 'virtualAccountGroups' -NotePropertyValue @() -Force
+            }
+        }
     }
     $updatedManifestContent = $manifestObj | ConvertTo-Json -Depth 20
     [System.IO.File]::WriteAllText($dstManifest, $updatedManifestContent, [System.Text.Encoding]::UTF8)

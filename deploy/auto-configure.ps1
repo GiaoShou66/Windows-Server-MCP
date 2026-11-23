@@ -597,6 +597,12 @@ function Invoke-BrokerApply {
             # Update access group
             $tool.jeaMapping.accessGroup = $Profile.identity.accessGroup
 
+            # DevMode: use JEA virtual account (no domain gMSA required) with explicit virtualAccountGroups
+            $tool.jeaMapping | Add-Member -NotePropertyName 'useGmsa' -NotePropertyValue $false -Force
+            if ($tool.jeaMapping.PSObject.Properties.Match('virtualAccountGroups').Count -eq 0 -or $null -eq $tool.jeaMapping.virtualAccountGroups) {
+                $tool.jeaMapping | Add-Member -NotePropertyName 'virtualAccountGroups' -NotePropertyValue @() -Force
+            }
+
             # Update revocation state
             if ($revokeSet.Contains($tool.toolId)) {
                 $tool | Add-Member -NotePropertyName 'revoked' -NotePropertyValue $true -Force
